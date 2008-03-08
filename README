@@ -1,0 +1,21 @@
+Welcome to Proximo.
+
+This program is a proxy solution for MySQL that enables you to munge your
+database connections in all sorts of strange and interesting ways.
+
+This software is released under the same terms as Perl itself.  Please see
+the LICENSE file for more information.  Parts of the technology used inside
+(notably the protocol we speak) is copyright MySQL AB.
+
+I have used various places as inspiration for this project.  The MySQL
+Proxy project, Dormando's Proxy for MySQL, and DBIx::MyServer.  The code
+organization and design patterns in use are based on the design that was
+evolved for the Perlbal project.
+
+Author is Mark Smith <mark@xb95.com> ... please find on the Perl or Freenode
+IRC networks as xb95 or email me with any questions.
+
+For usage information, well, read the source.  We don't have any documents
+yet... :-)
+
+Enjoy!
