@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 
-package Proximo::Server;
+package Proximo::Service;
 
 use strict;
 use IO::Socket::INET;
@@ -16,7 +16,7 @@ use fields (
 # construct a new Proximo server socket, this accepts new connections and
 # allows us to do something with them.
 sub new {
-    my Proximo::Server $self = shift;
+    my Proximo::Service $self = shift;
     $self = fields::new( $self ) unless ref $self;
 
     # get input arguments and setup
@@ -24,7 +24,7 @@ sub new {
     $self->{prox} = $prox;
 
     # debug \o/
-    Proximo::debug( "Proximo::Server construction begin." );
+    Proximo::debug( "Proximo::Service construction begin." );
 
     # sanitize a listening port option ...
     my $listen = $self->{prox}->opt('listen');
@@ -57,7 +57,7 @@ sub new {
 
 # this is fired when we have a new connection come in
 sub event_read {
-    my Proximo::Server $self = shift;
+    my Proximo::Service $self = shift;
 
     Proximo::debug( "One or more connections are available to accept." );
 
