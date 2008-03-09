@@ -77,6 +77,36 @@ sub event_packet {
                 Proximo::MySQL::Packet::ClientAuthentication->new( $self, $packet->sequence_number + 1, )
             );
 
+    # second stage, get a packet back from the server
+    } elsif ( $self->state eq 'authenticating' ) {
+        my $peek = ord( substr( $$packet_raw, 0, 1 ) );
+
+        # OK packet
+        if ( $peek == 0 ) {
+            my $packet = Proximo::MySQL::Packet::OK->new_from_raw( $seq, $packet_raw );
+            $self->state( 'wait_command' );
+            $self->server->_send_packet( $packet );
+
+        # error packet
+        } elsif ( $peek == 255 ) {
+            my $packet = Proximo::MySQL::Packet::Error->new_from_raw( $seq, $packet_raw );
+            Proximo::warn( 'Got an error from the server, lame.' );
+            
+        # EOF packet
+        } elsif ( $peek == 254 ) {
+            my $packet = Proximo::MySQL::Packet::EOF->new_from_raw( $seq, $packet_raw );
+
+            
+        # something else
+        } else {
+            print "OTHER\n";
+            
+        }
+        
+    # haven't put in any handling for this state?
+    } else {
+        Proximo::fatal( 'Received packet in unexpected state %s.', $self->state );
+        
     }
 }
 

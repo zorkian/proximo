@@ -23,6 +23,33 @@ sub new_from_raw {
     my $bufpos = 0;
     my $buflen = length( $$bufref );
 
+    # decode a length coded binary number and adjusts the buffer position accordingly
+    my $lcbin = sub {
+        my $first = unpack( 'C', substr( $$bufref, $bufpos++, 1 ) );
+
+        # easy cases
+        return $first
+            if $first <= 250; # this is the value
+        return undef
+            if $first == 251; # null
+
+        # 16 bit number (short)
+        if ( $first == 252 ) {
+            my $out = unpack( 'v', substr( $$bufref, $bufpos, 2 ) );
+            $bufpos += 2;
+            return $out;
+
+        # 24 bit number (fucked up)
+        } elsif ( $first == 253 ) {
+            Proximo::fatal( 'Lazy bastard, implement type 253 P_LCBIN!' );
+
+        # 64 bit number
+        } elsif ( $first == 254 ) {
+            Proximo::fatal( 'More laziness, figure out 64 bit unpack.' );
+
+        }
+    };
+
     # now iterate over the packets and start pulling data out of the buffer
     my @output;
     foreach my $type ( @_ ) {
@@ -56,8 +83,8 @@ sub new_from_raw {
             $bufpos += $len + 1;
 
         } elsif ( $type == P_LCBIN ) {
-            Proximo::fatal( "P_LCBIN not implemented in new_from_raw, oops." );
-            
+            push @output, $lcbin->();
+
         } elsif ( $type == P_RAW ) {
             push @output, substr( $$bufref, $bufpos );
             $bufpos = $buflen + 1;
@@ -472,6 +499,49 @@ sub new {
     return $self;
 }
 
+sub new_from_raw {
+    my Proximo::MySQL::Packet::OK $self = $_[0];
+    $self = fields::new( $self ) unless ref $self;
+
+    # note the null append to make P_NULLSTR work
+    my ( $seq, $bytes ) = ( $_[1], $_[2] );
+    my @data = $self->SUPER::new_from_raw( $seq, $bytes, P_BYTE, P_LCBIN, P_LCBIN, P_SHORT, P_SHORT, P_NULLSTR );
+
+    # get data into structures
+    $self->{affected_rows} = $data[1];
+    $self->{insert_id}     = $data[2];
+    $self->{server_status} = $data[3];
+    $self->{warning_count} = $data[4];
+    $self->{message}       = $data[5];
+
+    return $self;
+}
+
+sub message {
+    my Proximo::MySQL::Packet::OK $self = $_[0];
+    return $self->{message};
+}
+
+sub affected_rows {
+    my Proximo::MySQL::Packet::OK $self = $_[0];
+    return $self->{affected_rows};
+}
+
+sub insert_id {
+    my Proximo::MySQL::Packet::OK $self = $_[0];
+    return $self->{insert_id};
+}
+
+sub warning_count {
+    my Proximo::MySQL::Packet::OK $self = $_[0];
+    return $self->{warning_count};
+}
+
+sub server_status {
+    my Proximo::MySQL::Packet::OK $self = $_[0];
+    return $self->{server_status};
+}
+
 #############################################################################
 #############################################################################
 #############################################################################
@@ -489,11 +559,11 @@ use fields (
     );
     
 sub new_from_raw {
-    my Proximo::MySQL::Packet::Command $self = shift;
+    my Proximo::MySQL::Packet::Command $self = $_[0];
     $self = fields::new( $self ) unless ref $self;
 
     # now get the bytes and back-convert it
-    my ( $seq, $bytes ) = @_;
+    my ( $seq, $bytes ) = ( $_[1], $_[2] );
     my @data = $self->SUPER::new_from_raw( $seq, $bytes, P_BYTE, P_RAW );
 
     # load up the data

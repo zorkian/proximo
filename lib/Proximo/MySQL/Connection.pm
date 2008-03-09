@@ -131,8 +131,10 @@ sub event_read {
         my $seq = unpack( 'C', substr( $self->{buffer}, 3, 1 ) );
         last unless $buflen >= $len + 4;
 
-        # we've got the full thing, rip it out
-        my $packet_raw = substr( $self->{buffer}, 4, $len );
+        # we've got the full thing, rip it out; note we append a null here because
+        # the protocol likes to stick strings at the end of a packet and this is
+        # the easiest way for us to parse them out
+        my $packet_raw = substr( $self->{buffer}, 4, $len ) . "\0";
         $self->{buffer} = substr( $self->{buffer}, 4 + $len );
         $buflen = length( $self->{buffer} );
 
