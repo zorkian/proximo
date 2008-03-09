@@ -12,6 +12,7 @@ use fields (
         'mode',   # what mode we're in
         'state',  # what state this MySQL connection is in
         'buffer', # internal buffer of incoming data
+        'dbname', # active database name
     );
 
 # construct a new Proximo::Client connection, this is the connection between us
@@ -20,13 +21,14 @@ sub new {
     my Proximo::MySQL::Connection $self = shift;
     $self = fields::new( $self ) unless ref $self;
 
+    # pass through to our parent
+    $self->SUPER::new( @_ );
+
     # generic initialization
+    $self->{dbname} = undef;
     $self->{mode}   = undef;
     $self->{state}  = 'new';
     $self->{buffer} = '';
-
-    # pass through to our parent
-    $self->SUPER::new( @_ );
 
     return $self;
 }
@@ -100,7 +102,7 @@ sub _make_simple_result {
 # read in a packet from somewhere, parse out what it should be and instantiate it,
 # then call down to whatever and let them know
 sub event_read {
-    my Proximo::MySQL::Connection $self = shift;
+    my Proximo::MySQL::Connection $self = $_[0];
 
     # loop and try to read in data
     while ( 1 ) {
@@ -141,13 +143,22 @@ sub event_read {
 
 # render ourselves out for the management console
 sub as_string {
-    my Proximo::MySQL::Server $self = $_[0];
+    my Proximo::MySQL::Connection $self = $_[0];
 
     return sprintf(
             '%s: connected to %s:%d for %d seconds; state=%s, service=%s.',
             ref( $self ), $self->remote_ip, $self->remote_port, time - $self->time_established,
             $self->state, $self->service->name,
         ); 
+}
+
+# get/set the current database for this connection
+sub current_database {
+    my Proximo::MySQL::Connection $self = $_[0];
+    if ( scalar( @_ ) == 2 ) {
+        return $self->{dbname} = $_[1];
+    }
+    return $self->{dbname};
 }
 
 # these handlers are called in various states, we need to smack around anybody

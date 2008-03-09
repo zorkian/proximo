@@ -9,6 +9,8 @@ use Proximo::MySQL::Packet;
 use base 'Proximo::MySQL::Connection';
 
 use fields (
+        'backend',        # Proximo::MySQL::Backend object that is 'ours'
+        'backend_queue',  # queue of packets ready to go to a backend when we get one
     );
 
 # construct a new server connection, this is the connection between us
@@ -21,8 +23,10 @@ sub new {
     $self->SUPER::new( @_ );
 
     # set some internal shizzle
-    $self->{mode}  = 1;      # server mode
-    $self->{state} = 'init'; # initial state
+    $self->{mode}    = 1;        # server mode
+    $self->{state}   = 'init';   # initial state
+    $self->{backend} = undef;
+    $self->{backend_queue} = []; # packet queue
 
     # protocol dictates that we are responsible for sending a greeting to begin
     # with, so we start writable but ignore reading
@@ -60,34 +64,52 @@ sub event_packet {
         my $packet = Proximo::MySQL::Packet::ClientAuthentication->new_from_raw( $seq, $packet_raw );
         Proximo::debug( 'Attempted connection from: user=%s, database=%s.', $packet->user, $packet->database );
 
-        #$self->_send_packet(
-        #        Proximo::MySQL::Packet::Error->new( $self, $packet->sequence_number + 1, 2000, 'Access denied, bitch!' ),
-        #    );
+        # note that our current database is what they said
+        $self->current_database( $packet->database );
 
+        # FIXME: we should probably do some error checking on the incoming connection to ensure
+        # that the user should be allowed here... but for now, we just assume that if you can
+        # get to the service IP, you can get to the backend...
         $self->_send_packet(
-                Proximo::MySQL::Packet::OK->new( $self, $packet->sequence_number + 1, 0, 0, 0, 0, 'So awesome!' ),
+                Proximo::MySQL::Packet::OK->new( $self, $packet->sequence_number + 1 ),
             );
 
+        # next state is command state cycle
         $self->state( 'wait_command' );
 
     # get a command from the user and execute it
     } elsif ( $self->state eq 'wait_command' ) {
+        # FIXME: need better state management here, we never leave wait_command and we probably
+        # should, I don't think MySQL allows pipelining requests... of course, protecting ourselves
+        # against misbehaving clients is arguably not our responsibility.  hmm.
         my $packet = Proximo::MySQL::Packet::Command->new_from_raw( $seq, $packet_raw );
         Proximo::debug( 'Got command: type=%d, arg=%s.', $packet->command_type, $packet->argument );
+
+        # if we have a dedicated backend, let's send this on
+        if ( $self->backend ) {
+            $self->backend->_send_packet( $packet );
+
+        # guess not, so ask service for one
+        } else {
+            push @{ $self->backend_queue }, $packet;
+            $self->service->need_backend( $self );
+
+        }
 
         #$self->_send_packet(
         #        Proximo::MySQL::Packet::Error->new( $self, $packet->sequence_number + 1, 666, 'I can\'t do that, Dave.' ),
         #    );
-        $self->_make_simple_result(
-                $packet->sequence_number + 1,
-                [ 'box 1', 'box 2' ],
-                [ 'data here', 'data there' ],
-                [ 'data goes', 'EVERYWHERE' ],
-            );
+
+        #$self->_make_simple_result(
+        #        $packet->sequence_number + 1,
+        #        [ 'box 1', 'box 2' ],
+        #        [ 'data here', 'data there' ],
+        #        [ 'data goes', 'EVERYWHERE' ],
+        #    );
         
     # if we're in an unknown state, well fail...
     } else {
-        Proximo::fatal( 'Got a packet in unknown state %s.', $self->state );
+        Proximo::fatal( 'Got a packet in bad state %s.', $self->state );
 
     }
 }
@@ -107,6 +129,21 @@ sub _send_handshake {
     # set our state and watch for a response
     $self->state( 'handshake' );
     $self->watch_read( 1 );
+}
+
+# return ref to our queue
+sub backend_queue {
+    my Proximo::MySQL::Server $self = $_[0];
+    return $self->{backend_queue};
+}
+
+# get/set our backend
+sub backend {
+    my Proximo::MySQL::Server $self = $_[0];
+    if ( scalar( @_ ) == 2 ) {
+        return $self->{backend} = $_[1];
+    }
+    return $self->{backend};
 }
 
 1;

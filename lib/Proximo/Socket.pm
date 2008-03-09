@@ -21,7 +21,7 @@ sub new {
     $self = fields::new( $self ) unless ref $self;
 
     # debug output
-    Proximo::debug( "Proximo::Socket construction beginning." );
+    Proximo::debug( 'Proximo::Socket construction beginning.' );
 
     # store the information on the remote end for later
     my ( $srvc, $sock, $addr ) = @_;
@@ -31,7 +31,7 @@ sub new {
         # convert this to human readable
         my ( $pport, $pipr ) = Socket::sockaddr_in( $addr );
         my $pip = Socket::inet_ntoa( $pipr );
-        Proximo::info( "New connection $sock from: $pip:$pport" );
+        Proximo::info( 'New connection %s from: %s:%d.', ref( $sock ), $pip, $pport );
 
         # init our fields
         $self->{remoteip} = $pip;

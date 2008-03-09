@@ -66,6 +66,21 @@ sub new_from_raw {
             push @output, undef;
             $bufpos += 23;
 
+        } elsif ( $type == P_FILL13 ) {
+            push @output, undef;
+            $bufpos += 13;
+
+        } elsif ( $type == P_GRAB8 ) {
+            push @output, substr( $$bufref, $bufpos, 8 );
+            $bufpos += 8;
+
+        } elsif ( $type == P_GRAB13 ) {
+            push @output, substr( $$bufref, $bufpos, 13 );
+            $bufpos += 13;
+
+        } else {
+            Proximo::fatal( 'Unknown packet contents type in parse %d.', $type );
+            
         }
     }
 
@@ -132,7 +147,7 @@ sub _build {
                     $buf .= pack( 'C', 251 );
                 }
             }
-            else  { Proximo::fatal( "Unknown packet contents type \%d.", $type );      }
+            else  { Proximo::fatal( 'Unknown packet contents type %d.', $type );      }
         }
     }
 
@@ -173,14 +188,20 @@ use base 'Proximo::MySQL::Packet';
 
 use fields (
         'scramble',    # the scramble buffer used for password stuff
+        'protocol_id',
+        'version',
+        'thread_id',
+        'flags',
+        'charset',
+        'caps',        # capabilities
     );
 
 # construct a new packet for sending the initialization to the client
 sub new {
-    my Proximo::MySQL::Packet::ServerHandshakeInitialization $self = shift;
+    my Proximo::MySQL::Packet::ServerHandshakeInitialization $self = $_[0];
     $self = fields::new( $self ) unless ref $self;
 
-    my Proximo::MySQL::Connection $conn = shift;
+    my Proximo::MySQL::Connection $conn = $_[1];
     
     # new packet, no type, new sequence
     $self->SUPER::new( undef, 0 );
@@ -207,11 +228,67 @@ sub new {
     return $self;
 }
 
+# instantiate packet from network stream
+sub new_from_raw {
+    my Proximo::MySQL::Packet::ServerHandshakeInitialization $self = $_[0];
+    $self = fields::new( $self ) unless ref $self;
+
+    # now get the bytes and back-convert it
+    my ( $seq, $bytes ) = ( $_[1], $_[2] );
+    my @data = $self->SUPER::new_from_raw(
+            $seq, $bytes,
+            P_BYTE, P_NULLSTR, P_LONG, P_GRAB8, P_BYTE, P_SHORT, P_BYTE,
+            P_SHORT, P_FILL13, P_GRAB13,
+        );
+
+    # load up the data
+    $self->{protocol_id} = $data[0];
+    $self->{version}     = $data[1];
+    $self->{thread_id}   = $data[2];
+    $self->{scramble}    = $data[3] . $data[9]; # two chunks
+    $self->{flags}       = $data[5];
+    $self->{charset}     = $data[6];
+    $self->{caps}        = $data[7];
+
+    return $self;
+}
+
 # return the contents of the scramble buffer, should be 21 bytes of random noise
 # generated when this packet was created
 sub scramble_buffer {
-    my Proximo::MySQL::Packet::ServerHandshakeInitialization $self = shift;
+    my Proximo::MySQL::Packet::ServerHandshakeInitialization $self = $_[0];
     return $self->{scramble};
+}
+
+# I'm not going to comment the rest of these, OCD be damned
+sub protocol_id {
+    my Proximo::MySQL::Packet::ServerHandshakeInitialization $self = $_[0];
+    return $self->{protocol_id};
+}
+
+sub server_version {
+    my Proximo::MySQL::Packet::ServerHandshakeInitialization $self = $_[0];
+    return $self->{version};
+}
+
+sub thread_id {
+    my Proximo::MySQL::Packet::ServerHandshakeInitialization $self = $_[0];
+    return $self->{thread_id};
+}
+
+sub server_flags {
+    my Proximo::MySQL::Packet::ServerHandshakeInitialization $self = $_[0];
+    return $self->{flags};
+}
+
+sub server_language {
+    my Proximo::MySQL::Packet::ServerHandshakeInitialization $self = $_[0];
+    return $self->{charset};
+}
+
+sub server_status {
+    my Proximo::MySQL::Packet::ServerHandshakeInitialization $self = $_[0];
+    return $self->{caps};
 }
 
 #############################################################################
@@ -233,6 +310,31 @@ use fields (
         'scramble',
         'database',
     );
+
+# create a packet to send out
+sub new {
+    my Proximo::MySQL::Packet::ClientAuthentication $self = $_[0];
+    $self = fields::new( $self ) unless ref $self;
+
+    my Proximo::MySQL::Connection $conn = $_[1];
+    
+    # new packet, no type, new sequence
+    $self->SUPER::new( undef, $_[2] );
+
+    # now put together the packet itself
+    $self->_build(
+            P_LONG,    CLIENT_LONG_PASSWORD | CLIENT_CONNECT_WITH_DB | CLIENT_PROTOCOL_41 | CLIENT_SECURE_CONNECTION,
+            P_LONG,    16777216,    # max packet size
+            P_BYTE,    0x21,        # language, again, latin?
+            P_RAW,     "\0" x 23,   # filler
+            P_NULLSTR, $conn->service->proxy_user,
+            P_LCBIN,   0,           # SCRAMBLE BUFF GOES HERE FIXME FIXME
+            P_BYTE,    0,           # filler
+            P_NULLSTR, $conn->current_database,
+        );
+
+    return $self;
+}
 
 # called when we get this packet sent to us and we want to build it up from
 # some raw bytes
@@ -271,6 +373,12 @@ sub user {
 sub scramble_buffer {
     my Proximo::MySQL::Packet::ClientAuthentication $self = shift;
     return $self->{scramble};
+}
+
+# get the max packet size
+sub max_packet_size {
+    my Proximo::MySQL::Packet::ClientAuthentication $self = shift;
+    return $self->{max_packet_size};
 }
 
 #############################################################################
@@ -348,7 +456,7 @@ sub new {
     $self->{insert_id} = shift() + 0;
     $self->{server_status} = shift() + 0;
     $self->{warning_count} = shift() + 0;
-    $self->{message} = shift;
+    $self->{message} = shift() || '';
 
     # now put together the packet itself
     $self->_build(

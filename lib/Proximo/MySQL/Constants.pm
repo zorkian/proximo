@@ -121,6 +121,9 @@ use constant P_RAW => 5;     # raw byte string
 use constant P_LCSTR => 6;   # length coded string
 use constant P_FILL23 => 7;  # this one is kinda lame
 use constant P_LCBIN => 8;   # length coded binary
+use constant P_GRAB8 => 9;   # grab 8 bytes (lame lame lame)
+use constant P_GRAB13 => 10; # grab 13 bytes (more lameness)
+use constant P_FILL13 => 11; # bleh, you get the idea
 
 @ISA = qw( Exporter );
 
@@ -240,6 +243,9 @@ use constant P_LCBIN => 8;   # length coded binary
     P_LCBIN
     P_FILL23
     P_LCSTR
+    P_GRAB8
+    P_GRAB13
+    P_FILL13
 );
 
 1;

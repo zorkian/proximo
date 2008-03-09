@@ -7,13 +7,14 @@
 package Proximo::MySQL::Service;
 
 use strict;
+use Proximo::MySQL::Backend;
 use Proximo::Service;
 use base 'Proximo::Service';
 
 use fields (
-        'proxy_to',   # ip:port to proxy incoming requests to
-        'proxy_user', # username of the remote server
-        'proxy_pass', # password of the remote server
+        'proxy_to',     # ip:port to proxy incoming requests to
+        'proxy_user',   # username of the remote server
+        'proxy_pass',   # password of the remote server
     );
 
 # construct a new Proximo server socket, this accepts new connections and
@@ -88,6 +89,19 @@ sub set {
         return $self->SUPER::set( $key, $val );
 
     }
+}
+
+# called by Server connections when they need a backend connection
+sub need_backend {
+    my Proximo::MySQL::Service $self = $_[0];
+    my Proximo::MySQL::Server $srvr = $_[1];
+
+    # debug
+    Proximo::debug( 'Spawning new backend to %s.', $self->proxy_to );
+
+    # start connecting a new backend and tell it who to notify when it
+    # gets connected and setup
+    Proximo::MySQL::Backend->new( $self, $srvr );
 }
 
 1;
