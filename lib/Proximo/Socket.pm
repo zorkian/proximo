@@ -113,13 +113,20 @@ sub time_established {
     return $self->{time_est};    
 }
 
+# return our service
+sub service {
+    my Proximo::Socket $self = $_[0];
+    return $self->{service};
+}
+
 # generic string information
 sub as_string {
     my Proximo::Socket $self = $_[0];
 
     return sprintf(
-            '%s: connected to %s:%d for %d seconds.',
+            '%s: connected to %s:%d for %d seconds; service=%s.',
             ref( $self ), $self->remote_ip, $self->remote_port, time - $self->time_established,
+            $self->service ? $self->service->name : "(none)",
         ); 
 }
 

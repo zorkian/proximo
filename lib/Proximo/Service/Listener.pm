@@ -12,7 +12,6 @@ use base 'Proximo::Socket';
 
 use fields (
         'listen',   # ip:port we're listening on
-        'service',  # who owns us (Proximo::Service)
     );
 
 # construct a new Proximo server socket, this accepts new connections and
@@ -24,7 +23,6 @@ sub new {
     # sanitize a listening port option ...
     my ( $service, $listen ) = @_;
     $self->{listen}  = $listen;
-    $self->{service} = $service;
 
     # now setup the socket for listening
     my $sock = IO::Socket::INET->new(
@@ -79,16 +77,21 @@ sub event_read {
     }
 }
 
-# return our service object
-sub service {
-    my Proximo::Service::Listener $self = $_[0];
-    return $self->{service};
-}
-
 # returns our current listen configuration
 sub listening_on {
     my Proximo::Service::Listener $self = $_[0];
     return $self->{listen};
+}
+
+# note what we are and who we're listening for
+sub as_string {
+    my Proximo::Service::Listener $self = $_[0];
+
+    return sprintf(
+            '%s: listening on %s for %d seconds; service=%s.',
+            ref( $self ), $self->listening_on, time - $self->time_established,
+            $self->service->name,
+        );
 }
 
 1;

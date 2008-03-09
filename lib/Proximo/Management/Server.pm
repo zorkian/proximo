@@ -34,7 +34,11 @@ sub event_read {
     while ( my $line = $self->get_line ) {
         # socks command - show open sockets
         if ( $line =~ /^socks/i ) {
-            $self->write_line( "socks" );
+            my $desc = Proximo::Socket->DescriptorMap;
+            foreach my $sock ( values %$desc ) {
+                $self->write_line( $sock->as_string );
+            }
+            $self->write_line( '---' );
 
         # lame, they are sending junk
         } else {
