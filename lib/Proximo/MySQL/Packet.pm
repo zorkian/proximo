@@ -359,7 +359,9 @@ sub new {
             P_BYTE,    0x21,        # language, again, latin?
             P_RAW,     "\0" x 23,   # filler
             P_NULLSTR, $conn->service->proxy_user,
-            P_LCBIN,   0,           # SCRAMBLE BUFF GOES HERE FIXME FIXME
+            # FIXME: need a way to have this not be here if we have no scramble buff...
+            # ugh, the mysql protocol is kinda retarded in this case
+            #P_LCBIN,   0,           # SCRAMBLE BUFF GOES HERE FIXME FIXME
             P_BYTE,    0,           # filler
             P_NULLSTR, $conn->current_database,
         );
