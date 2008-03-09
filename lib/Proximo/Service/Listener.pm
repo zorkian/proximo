@@ -5,6 +5,7 @@ package Proximo::Service::Listener;
 use strict;
 use IO::Socket::INET;
 use Proximo::MySQL::Server;
+use Proximo::Management::Server;
 use Proximo::Socket;
 use Socket;
 use base 'Proximo::Socket';
@@ -41,7 +42,7 @@ sub new {
         or Proximo::fatal( "Unable to make listener non-blocking: ##" );
 
     # now we can do this final setup, we delayed it earlier...
-    $self->SUPER::new( $sock );
+    $self->SUPER::new( $service, $sock );
 
     # turn on watching for readability (new connections)
     $self->watch_read( 1 );
@@ -53,7 +54,7 @@ sub new {
 # FIXME: it would be pretty neat if we made this configurable so it could spawn
 # anything and not a MySQL connection ... a generic perl proxy app, cool
 sub event_read {
-    my Proximo::Service::Listener $self = shift;
+    my Proximo::Service::Listener $self = $_[0];
 
     Proximo::debug( "One or more connections are available to accept." );
 
@@ -61,14 +62,27 @@ sub event_read {
         # disable blocking
         IO::Handle::blocking( $sock , 0 );
 
-        # FIXME: put this in some IF on debugging/verbosity...
-        my ($pport, $pipr) = Socket::sockaddr_in($addr);
-        my $pip = Socket::inet_ntoa($pipr);
-        Proximo::info( "New connection $sock from: $pip:$pport" );
+        # simple_proxy is (for now) just MySQL...
+        # FIXME: generic needs to happen here
+        if ( $self->service->mode eq 'simple_proxy' ) {
+            Proximo::MySQL::Server->new( $self->service, $sock, $addr );
 
-        # now send this off to our client
-        Proximo::MySQL::Server->new( $self->{service}, $sock );
+        # management console happens elsewhere
+        } elsif ( $self->service->mode eq 'management' ) {
+            Proximo::Management::Server->new( $self->service, $sock, $addr );
+
+        # this is really bad actually, really bad...
+        } else {
+            Proximo::warn( 'Attempted to accept socket for service %s with unknown mode %s.', $self->service->name, $self->service->mode );
+            close $sock;
+        }
     }
+}
+
+# return our service object
+sub service {
+    my Proximo::Service::Listener $self = $_[0];
+    return $self->{service};
 }
 
 # returns our current listen configuration

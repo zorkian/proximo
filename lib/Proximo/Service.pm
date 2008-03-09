@@ -14,7 +14,9 @@ use fields (
         'enabled',    # 1/0 if we're enabled or not
         'listen_on',  # array of what we're configured to listen on
         'listeners',  # array of objects listening for us
+        'mode',       # what kind of service this is, really 
         'name',       # name of this service
+        'proxy_to',   # ip:port to proxy incoming requests to
     );
     
 # class variables
@@ -41,8 +43,10 @@ sub new {
 
     # get input arguments and setup
     $self->{name}      = $name;
+    $self->{mode}      = 'unknown';
     $self->{listeners} = [];
     $self->{listen_on} = [];
+    $self->{proxy_to}  = undef;
 
     # store this service and note it's been built
     $Services{$self->name} = $self;
@@ -57,15 +61,19 @@ sub enable {
     my Proximo::Service $self = shift;
 
     # if no listener objects, fail
-    unless ( scalar( @{ $self->listen_on } ) > 0 ) {
-        Proximo::warn( 'Attempted to enable service %s, but no listen defined.', $self->name );
-        return undef;
-    }
+    return Proximo::warn( 'Attempted to enable service %s, but no listen defined.', $self->name )
+        unless scalar( @{ $self->listen_on } ) > 0;
 
     # if we're already enabled, bail
     if ( $self->enabled ) {
         Proximo::warn( 'Attempted to enable already enabled service %s.', $self->name );
         return 1;
+    }
+
+    # if we don't have the right stuff to enable, bail
+    if ( $self->mode eq 'simple_proxy' ) {
+        return Proximo::warn( 'Unable to enable service %s: proxy_to not defined.', $self->name )
+            unless $self->proxy_to;
     }
 
     # now enable the listeners
@@ -90,14 +98,12 @@ sub listen {
 
     # ensure we got something useful
     my $str = shift;
-    Proximo::fatal( 'Proximo::Service->listen() called with no arguments.' )
+    return Proximo::warn( 'Proximo::Service->listen() called with no arguments.' )
         unless $str;
 
     # FIXME: we should be able to change where we listen on the fly...
-    if ( scalar( @{ $self->listeners } ) > 0 ) {
-        Proximo::warn( 'Attempted to change listen config of running service %s.', $self->name );
-        return;
-    }
+    return Proximo::warn( 'Attempted to change listen config of running service %s.', $self->name )
+        if scalar( @{ $self->listeners } ) > 0;
 
     # split on comma
     foreach my $combo ( split( /,/, $str ) ) {
@@ -131,6 +137,12 @@ sub enabled {
     return $self->{enabled} ? 1 : 0;
 }
 
+# return what proxy_to is configured as
+sub proxy_to {
+    my Proximo::Service $self = $_[0];
+    return $self->{proxy_to};
+}
+
 # set some variables
 sub set {
     my Proximo::Service $self = shift;
@@ -142,7 +154,25 @@ sub set {
     # now split out and set what they want
     if ( $key eq 'listen' ) {
         $self->listen( $val );
+
+    } elsif ( $key eq 'mode' ) {
+        return Proximo::warn( 'Invalid mode specified: %s.', $val )
+            unless $val =~ /^(?:simple_proxy|management)$/;
+        $self->{mode} = $val;
+
+    } elsif ( $key eq 'proxy_to' ) {
+        $self->{proxy_to} = $val;
+
+    } else {
+        return Proximo::warn( 'Unable to determine what to do with key %s.', $self->name );
+
     }
+}
+
+# returns what mode we're in
+sub mode {
+    my Proximo::Service $self = $_[0];
+    return $self->{mode};
 }
 
 # return a service by name, capitalization this way to annotate that you can

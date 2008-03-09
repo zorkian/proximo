@@ -20,12 +20,12 @@ sub new {
     my Proximo::MySQL::Connection $self = shift;
     $self = fields::new( $self ) unless ref $self;
 
-    my ( $prox, $sock ) = @_;
-    $self->SUPER::new( $sock );
+    my ( $srvc, $sock ) = @_;
+    $self->SUPER::new( $srvc, $sock );
 
     # generic initialization
-    $self->{mode} = undef;
-    $self->{state} = undef;
+    $self->{mode}   = undef;
+    $self->{state}  = 'new';
     $self->{buffer} = '';
 
     return $self;
@@ -93,16 +93,6 @@ sub _make_simple_result {
     return scalar( @packets );
 } 
 
-# default writable event handling, mostly we just send out any pending data and
-# shut down writing if we have nothing left to do
-sub event_write {
-    my Proximo::MySQL::Connection $self = shift;
-
-    # if nothing to write shut off watching for further writes
-    $self->watch_write( 0 )
-        if $self->write;
-}
-
 # read in a packet from somewhere, parse out what it should be and instantiate it,
 # then call down to whatever and let them know
 sub event_read {
@@ -120,13 +110,13 @@ sub event_read {
         }
 
         # if empty buffer, nothing to read, done
-        Proximo::debug( 'Read %d bytes from socket.', length( $$read ) );
         last unless $$read;
 
         # got some bytes, let's append to our internal buffer
+        Proximo::debug( 'Read %d bytes from socket.', length( $$read ) );
         $self->{buffer} .= $$read;
     }
-    
+
     # now try to bang some packets off
     my $buflen = length( $self->{buffer} );
     while ( $buflen >= 4 ) {
@@ -143,7 +133,17 @@ sub event_read {
         # pass this raw packet data to our children
         $self->event_packet( $seq, \$packet_raw );
     }
+}
 
+# render ourselves out for the management console
+sub as_string {
+    my Proximo::MySQL::Server $self = $_[0];
+
+    return sprintf(
+            '%s: connected to %s:%d for %d seconds; state=%s.',
+            ref( $self ), $self->remote_ip, $self->remote_port, time - $self->time_established,
+            $self->state,
+        ); 
 }
 
 # these handlers are called in various states, we need to smack around anybody

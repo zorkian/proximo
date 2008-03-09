@@ -3,6 +3,7 @@
 package Proximo;
 
 use strict;
+use Carp qw/ confess /;
 use Data::Dumper;
 use Proximo::Configuration;
 use Proximo::Service;
@@ -41,6 +42,8 @@ sub warn {
     $string =~ s/[\r\n]+$//;
     warn sprintf( "[WARN] \%s > $string\n", scalar(localtime), @args )
         if VERBOSITY >= 1;
+
+    return undef;
 }
 
 # call as if this was printf ... prints out some text if the verbose option
@@ -51,6 +54,8 @@ sub info {
     $string =~ s/[\r\n]+$//;
     printf "[INFO] \%s > $string\n", scalar(localtime), @args
         if VERBOSITY >= 2;
+
+    return 1;
 }
 
 # ultra verbose debugging stuff
@@ -60,6 +65,12 @@ sub debug {
     $string =~ s/[\r\n]+$//;
     printf "[DBUG] \%s > $string\n", scalar(localtime), @args
         if VERBOSITY >= 3;
+}
+
+# die with a backtrace
+sub bt {
+    Proximo::warn( @_ );
+    confess();
 }
 
 # all purpose debugging for dumping stuff out

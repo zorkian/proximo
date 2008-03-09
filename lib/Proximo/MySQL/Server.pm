@@ -18,8 +18,7 @@ sub new {
     $self = fields::new( $self ) unless ref $self;
 
     # initialize the work via our parent
-    my ( $prox, $sock ) = @_;
-    $self->SUPER::new( $prox, $sock );
+    $self->SUPER::new( @_ );
 
     # set some internal shizzle
     $self->{mode}  = 1;      # server mode
