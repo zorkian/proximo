@@ -20,13 +20,13 @@ sub new {
     my Proximo::MySQL::Connection $self = shift;
     $self = fields::new( $self ) unless ref $self;
 
-    my ( $srvc, $sock ) = @_;
-    $self->SUPER::new( $srvc, $sock );
-
     # generic initialization
     $self->{mode}   = undef;
     $self->{state}  = 'new';
     $self->{buffer} = '';
+
+    # pass through to our parent
+    $self->SUPER::new( @_ );
 
     return $self;
 }
@@ -60,7 +60,11 @@ sub _send_packet {
 
     # write out the built packet, and also turn on watching for writability
     # to ensure that we finish sending this packet out
-    $self->write( $packet->_raw );
+    my $raw = $packet->_raw;
+    Proximo::debug( 'Preparing to write %d bytes.', length( $$raw ) );
+
+    # now send and turn on watching for writable notifications
+    $self->write( $raw );
     $self->watch_write( 1 );
 }
 
