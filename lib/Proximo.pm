@@ -129,8 +129,6 @@ sub _try_hooks {
 # housekeeping.  this is safe to call whenever you want but it should never
 # be called by end-users, only by Proximo.
 sub _loop_maintenance {
-    Proximo::debug( 'End of loop maintenance beginning.' );
-
     # nothing for now...
 }
 

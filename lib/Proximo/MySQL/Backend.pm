@@ -46,13 +46,13 @@ sub new {
 
     # save our server
     $self->{server} = $server;
-    $self->current_database( $self->server->current_database );
 
     # initialize the work via our parent
     $self->SUPER::new( $svc, $sock, $addr );
 
     # now turn on watching for reads, as the first thing that happens is
     # the server will send us a packet saying "hey what's up my name's bob"
+    $self->current_database( $self->server->current_database );
     $self->state( 'connecting' );
     $self->watch_read( 1 );
 
