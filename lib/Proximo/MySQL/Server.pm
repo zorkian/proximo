@@ -83,11 +83,12 @@ sub event_packet {
         # should, I don't think MySQL allows pipelining requests... of course, protecting ourselves
         # against misbehaving clients is arguably not our responsibility.  hmm.
         my $packet = Proximo::MySQL::Packet::Command->new_from_raw( $seq, $packet_raw );
-        Proximo::debug( 'Got command: type=%d, arg=%s.', $packet->command_type, $packet->argument );
+        Proximo::info( 'Got command: type=%d, arg=%s.', $packet->command_type, $packet->argument );
 
         # if we have a dedicated backend, let's send this on
         if ( $self->backend ) {
-            $self->backend->_send_packet( $packet );
+            Proximo::debug( 'Using existing backend.' );
+            $self->backend->send_packet( $packet );
 
         # guess not, so ask service for one
         } else {
@@ -112,6 +113,20 @@ sub event_packet {
         Proximo::fatal( 'Got a packet in bad state %s.', $self->state );
 
     }
+}
+
+# called when a backend has connected and is available, we can send queries through
+# from the queue using this 
+sub backend_available {
+    my Proximo::MySQL::Server $self = $_[0];
+    my Proximo::MySQL::Backend $be = $_[1];
+
+    # if we have a queue, great...
+    return unless @{ $self->backend_queue };
+
+    # pop the first packet
+    my $pkt = shift @{ $self->backend_queue };
+    $be->send_packet( $pkt );
 }
 
 # used to send a handshake to the user.  preconditions: we're writable, and we're

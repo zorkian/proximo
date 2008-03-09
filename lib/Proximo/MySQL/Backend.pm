@@ -12,7 +12,7 @@ use Socket qw/ PF_INET IPPROTO_TCP SOCK_STREAM SOL_SOCKET SO_ERROR
 use base 'Proximo::MySQL::Connection';
 
 use fields (
-        'server',
+        'server',   # our P::M::Server object
     );
     
 # construction is fun for you and me
@@ -56,6 +56,9 @@ sub new {
     $self->state( 'connecting' );
     $self->watch_read( 1 );
 
+    # and now, we belong to you
+    $self->server->backend( $self );
+
     return $self;
 }
 
@@ -83,31 +86,54 @@ sub event_packet {
 
         # OK packet
         if ( $peek == 0 ) {
+            # we've authenticated, yay
             my $packet = Proximo::MySQL::Packet::OK->new_from_raw( $seq, $packet_raw );
-            $self->state( 'wait_command' );
-            $self->server->_send_packet( $packet );
+            Proximo::debug( 'Backend server authentication successful.' );
+            $self->state( 'idle' );
+
+            # okay, now let's inform the server
+            $self->server->backend_available( $self );
 
         # error packet
         } elsif ( $peek == 255 ) {
             my $packet = Proximo::MySQL::Packet::Error->new_from_raw( $seq, $packet_raw );
             Proximo::warn( 'Got an error from the server, lame.' );
-            
-        # EOF packet
-        } elsif ( $peek == 254 ) {
-            my $packet = Proximo::MySQL::Packet::EOF->new_from_raw( $seq, $packet_raw );
 
-            
+            # FIXME: is this right?  I'm too tired to really think if this is the proper thing
+            # to do in this case.  test, test...
+            $self->close( 'error' );
+            $self->server->close( 'error' );
+
         # something else
         } else {
-            print "OTHER\n";
+            Proximo::fatal( 'Really bad peek value %d.', $peek );
             
         }
+
+    # when we get a response in this state, we can send it to the client
+    } elsif ( $self->state eq 'wait_response' ) {
+        # FIXME: this needs to be done in a non-manual way.  this is just a hack to see the whole
+        # thing working...!
+        my $buf = substr( pack( 'V', length( $$packet_raw ) ), 0, 3) . chr( $seq ) . $$packet_raw;
+        $self->server->write( \$buf );
+        $self->server->watch_write( 1 );
         
     # haven't put in any handling for this state?
     } else {
         Proximo::fatal( 'Received packet in unexpected state %s.', $self->state );
         
     }
+}
+
+# send a packet from the client to the backend
+sub send_packet {
+    my Proximo::MySQL::Backend $self = $_[0];
+    my Proximo::MySQL::Packet $pkt = $_[1];
+
+    $self->state( 'wait_response' );
+    $self->_send_packet( $pkt );
+
+    return 1;
 }
 
 # return the server

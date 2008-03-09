@@ -23,6 +23,10 @@ sub new_from_raw {
     my $bufpos = 0;
     my $buflen = length( $$bufref );
 
+    # rebuild raw if we retransmit this packet
+    my $tempbuf = substr( pack( 'V', $buflen ), 0, 3) . chr( $self->{seq} ) . $$bufref;
+    $self->{raw} = \$tempbuf;
+
     # decode a length coded binary number and adjusts the buffer position accordingly
     my $lcbin = sub {
         my $first = unpack( 'C', substr( $$bufref, $bufpos++, 1 ) );
