@@ -144,9 +144,9 @@ sub as_string {
     my Proximo::MySQL::Server $self = $_[0];
 
     return sprintf(
-            '%s: connected to %s:%d for %d seconds; state=%s.',
+            '%s: connected to %s:%d for %d seconds; state=%s, service=%s.',
             ref( $self ), $self->remote_ip, $self->remote_port, time - $self->time_established,
-            $self->state,
+            $self->state, $self->service->name,
         ); 
 }
 

@@ -3,6 +3,8 @@
 package Proximo::Configuration;
 
 use strict;
+use Proximo::MySQL::Service;
+use Proximo::Management::Service;
 
 # load a configuration file
 sub load_config_file {
@@ -58,13 +60,17 @@ sub exec_management_command {
     };
 
     # this is a very straightforward pattern match on commands...
-    if ( $cmd =~ /^create\s+service\s+([\w\d]+)$/i ) {
-        my $name = $1;
+    if ( $cmd =~ /^create\s+(\w+?)\s+service\s+([\w\d]+)$/i ) {
+        my ( $type, $name ) = ( lc $1, $2 );
 
         # make a new service
-        Proximo::info( 'Creating service %s.', $name );
-        my $svc = Proximo::Service->new( $name );
-        $ctx->{cur_service} = $svc;
+        if ( $type eq 'mysql' ) {
+            $ctx->{cur_service} = Proximo::MySQL::Service->new( $name );
+        } elsif ( $type eq 'management' ) {
+            $ctx->{cur_service} = Proximo::Management::Service->new( $name );
+        } else {
+            return Proximo::warn( 'Service type %s unknown to create service named %s.', $type, $name );
+        }
 
     # setting the value of something
     } elsif ( $cmd =~ /^(?:([\w\d]+)\.)?([\w\d]+)\s*=\s*(.+)$/ ) {
@@ -81,15 +87,19 @@ sub exec_management_command {
 
     } elsif ( $cmd =~ /^enable(?:\s+([\w\d]+))?$/i ) {
         my $name = $1;
+
+        # again with the names
         $name ||= $ctx->{cur_service}->name
             if $ctx->{cur_service};
         my $svc = $svc_from_name->( $name )
             or return undef;
 
+        # main screen turn on (comment OCD strikes again)
         $svc->enable;
 
     } else {
-        Proximo::warn( 'Unknown configuration command: %s', $cmd );
+        Proximo::warn( 'Unknown configuration command: %s.', $cmd );
+
     }
 }
 

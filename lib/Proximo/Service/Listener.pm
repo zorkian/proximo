@@ -60,20 +60,9 @@ sub event_read {
         # disable blocking
         IO::Handle::blocking( $sock , 0 );
 
-        # simple_proxy is (for now) just MySQL...
-        # FIXME: generic needs to happen here
-        if ( $self->service->mode eq 'simple_proxy' ) {
-            Proximo::MySQL::Server->new( $self->service, $sock, $addr );
-
-        # management console happens elsewhere
-        } elsif ( $self->service->mode eq 'management' ) {
-            Proximo::Management::Server->new( $self->service, $sock, $addr );
-
-        # this is really bad actually, really bad...
-        } else {
-            Proximo::warn( 'Attempted to accept socket for service %s with unknown mode %s.', $self->service->name, $self->service->mode );
-            close $sock;
-        }
+        # tell the service to take this connection, close it if they decline
+        $self->service->take_accepted_connection( $sock, $addr )
+            or close( $sock );
     }
 }
 
