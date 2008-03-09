@@ -1,17 +1,24 @@
 #!/usr/bin/perl
+#
+# a service is defined as something that listens on a port and takes incoming
+# connects and does something with it.  this usually involves creating another
+# class to pass the incoming socket off to.
 
 package Proximo::Service;
 
 use strict;
-use IO::Socket::INET;
-use Proximo::MySQL::Server;
+use Proximo::Service::Listener;
 use Proximo::Socket;
-use Socket;
-use base 'Proximo::Socket';
 
 use fields (
-        'prox',    # Proximo object, who owns us
+        'enabled',    # 1/0 if we're enabled or not
+        'listen_on',  # array of what we're configured to listen on
+        'listeners',  # array of objects listening for us
+        'name',       # name of this service
     );
+    
+# class variables
+our ( %Services );
 
 # construct a new Proximo server socket, this accepts new connections and
 # allows us to do something with them.
@@ -19,60 +26,135 @@ sub new {
     my Proximo::Service $self = shift;
     $self = fields::new( $self ) unless ref $self;
 
+    # arguments are name, and that's about it
+    my $name = shift;
+    unless ( $name ) {
+        Proximo::warn( 'Attempted to create a service with no name!' );
+        return undef;
+    }        
+
+    # error check
+    if ( exists $Services{$name} ) {
+        Proximo::warn( 'Attempted to redeclare service with name %s.', $name );
+        return undef;
+    }    
+
     # get input arguments and setup
-    my $prox = shift;
-    $self->{prox} = $prox;
+    $self->{name}      = $name;
+    $self->{listeners} = [];
+    $self->{listen_on} = [];
 
-    # debug \o/
-    Proximo::debug( "Proximo::Service construction begin." );
-
-    # sanitize a listening port option ...
-    my $listen = $self->{prox}->opt('listen');
-    $listen ||= '127.0.0.1:2306';
-    $listen = "127.0.0.1:$listen" if $listen =~ /^\d+$/;
-
-    # now setup the socket for listening
-    my $sock = IO::Socket::INET->new(
-            LocalAddr => $listen,
-            Proto => 'tcp',
-            Listen => 1024,
-            ReuseAddr => 1,
-        );
-    Proximo::fatal( "Failed to listen on $listen: ##" )
-        unless $sock;
-    Proximo::info( "Server listening on $listen." );
-
-    # try to make this non-blocking
-    IO::Handle::blocking( $sock, 0 )
-        or Proximo::fatal( "Unable to make listener non-blocking: ##" );
-
-    # now create and setup final things
-    $self->SUPER::new( $sock );
-
-    # turn on watching for readability (new connections)
-    $self->watch_read( 1 );
+    # store this service and note it's been built
+    $Services{$self->name} = $self;
+    Proximo::debug( 'Proximo::Service named %s constructed.', $self->name );
 
     return $self;
 }
 
-# this is fired when we have a new connection come in
-sub event_read {
+# attempt to enable a service, which basically means that we will start
+# listening on the given port
+sub enable {
     my Proximo::Service $self = shift;
 
-    Proximo::debug( "One or more connections are available to accept." );
-
-    while ( my ( $sock, $addr ) = $self->{sock}->accept ) {
-        # disable blocking
-        IO::Handle::blocking( $sock , 0 );
-
-        # FIXME: put this in some IF on debugging/verbosity...
-        my ($pport, $pipr) = Socket::sockaddr_in($addr);
-        my $pip = Socket::inet_ntoa($pipr);
-        Proximo::info( "New connection $sock from: $pip:$pport" );
-
-        # now send this off to our client
-        Proximo::MySQL::Server->new( $self->{prox}, $sock );
+    # if no listener objects, fail
+    unless ( scalar( @{ $self->listen_on } ) > 0 ) {
+        Proximo::warn( 'Attempted to enable service %s, but no listen defined.', $self->name );
+        return undef;
     }
+
+    # if we're already enabled, bail
+    if ( $self->enabled ) {
+        Proximo::warn( 'Attempted to enable already enabled service %s.', $self->name );
+        return 1;
+    }
+
+    # now enable the listeners
+    foreach my $listen ( @{ $self->listen_on } ) {
+        Proximo::debug( 'Spawning listener for service %s on %s.', $self->name, $listen );
+        push @{ $self->{listeners} },
+            Proximo::Service::Listener->new( $self, $listen );
+    }
+
+    return 1;
+}
+
+# return our name (if you couldn't tell)
+sub name {
+    my Proximo::Service $self = $_[0];
+    return $self->{name};
+}
+
+# set somewhere for us to listen
+sub listen {
+    my Proximo::Service $self = shift;
+
+    # ensure we got something useful
+    my $str = shift;
+    Proximo::fatal( 'Proximo::Service->listen() called with no arguments.' )
+        unless $str;
+
+    # FIXME: we should be able to change where we listen on the fly...
+    if ( scalar( @{ $self->listeners } ) > 0 ) {
+        Proximo::warn( 'Attempted to change listen config of running service %s.', $self->name );
+        return;
+    }
+
+    # split on comma
+    foreach my $combo ( split( /,/, $str ) ) {
+        # trim and default to localhost
+        $combo =~ s/^\s+//;
+        $combo =~ s/\s+$//;
+        $combo ||= '127.0.0.1:2306';
+        $combo = "127.0.0.1:$combo"
+            if $combo =~ /^\d+$/;
+
+        # store this address
+        push @{ $self->{listen_on} }, $combo;
+    }
+}
+
+# return arrayref of objects listening for us
+sub listeners {
+    my Proximo::Service $self = $_[0];
+    return $self->{listeners};
+}
+
+# return arrayref of addresses we're configured to listen on
+sub listen_on {
+    my Proximo::Service $self = $_[0];
+    return $self->{listen_on};
+}
+
+# return whether we're enabled or not
+sub enabled {
+    my Proximo::Service $self = $_[0];
+    return $self->{enabled} ? 1 : 0;
+}
+
+# set some variables
+sub set {
+    my Proximo::Service $self = shift;
+    my ( $key, $val ) = @_;
+
+    $key = lc $key;
+    Proximo::debug( 'Service %s setting %s = %s.', $self->name, $key, $val );
+
+    # now split out and set what they want
+    if ( $key eq 'listen' ) {
+        $self->listen( $val );
+    }
+}
+
+# return a service by name, capitalization this way to annotate that you can
+# call this on the class, don't need an object...
+sub GetServiceByName {
+    return $Services{$_[1]};
+}
+
+# return the raw services hash, this is a bit low level, so hopefully if you're
+# messing with this you know what you're doing
+sub GetServices {
+    return \%Services;
 }
 
 1;

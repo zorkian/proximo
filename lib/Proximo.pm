@@ -5,34 +5,21 @@ package Proximo;
 use strict;
 use Data::Dumper;
 use Proximo::Configuration;
+use Proximo::Service;
 use Proximo::Socket;
 
 use constant VERBOSITY => 3; # 0 = quiet (no warnings), 1 = normal (warnings),
                              # 2 = verbose (info), 3 = very verbose (debug)
 
-our $VERSION = "0.01";
+our $VERSION = '0.01';
 our ( %Hooks );
 
 # create a new instance of Proximo ... basically defines what exactly we are
 # going to be doing and how we're getting there
-sub new {
-    my ( $class, %opts ) = @_;
-
-    my $self = { opts => \%opts };
-    bless $self, $class;
-
-    # presumably they gave us a configuration file to load...
-    if ( $self->opt('config_file') ) {
-        Proximo::info( 'Loading configuration from %s.', $self->opt('config_file') );
-        Proximo::Configuration::load_config_file( $self->opt('config_file') );
-    }
-
-    return $self;
-}
-
-# gets an option as configured in the hash
-sub opt {
-    return $_[0]->{opts}->{$_[1]};
+sub LoadConfigFile {
+    my ( $class, $fn ) = @_;
+    Proximo::info( 'Loading configuration from %s.', $fn );
+    Proximo::Configuration::load_config_file( $fn );
 }
 
 # called on a fatal error.  put ## in your string to insert the contents of
@@ -44,7 +31,7 @@ sub fatal {
     $string =~ s/##/$err/;
 
     $string =~ s/[\r\n]+$//;
-    die sprintf( "[FATAL] \%s > $string\n", scalar(localtime), @args );
+    die sprintf( "[EXIT] \%s > $string\n", scalar(localtime), @args );
 }
 
 # print out a warning on the STDERR and call it good
@@ -140,12 +127,13 @@ sub _loop_maintenance {
 # the main loop.  this means we now have control of the situation.  if the
 # user wants to process things, they can insert themselves into one of our
 # various hooks, or use the main callback.
-sub run {
+sub Run {
     # annotate that we're off to the races
     Proximo::info( 'Proximo beginning main execution.' );
 
     # ensure we have some services to run
-    Proximo::debug( 'FIXME: need to ensure we have services to run.' );
+    Proximo::fatal( 'No configured services, unable to run.' )
+        unless scalar( %{ Proximo::Service->GetServices } ) > 0;
 
     # this actually passes through to Danga::Socket ...
     Proximo::Socket->SetLoopTimeout( 5000 );

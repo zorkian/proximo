@@ -39,21 +39,54 @@ sub exec_management_command {
         ( $ctx, $cmd ) = ( $cmd, shift );
     }
 
+    # helper for getting a service name
+    my $svc_from_name = sub {
+        my $svc_name = shift;
+        unless ( $svc_name ) {
+            Proximo::warn( 'Unable to determine service to use for management command.' );
+            return undef;
+        }
+
+        # now get the service
+        my $svc = Proximo::Service->GetServiceByName( $svc_name );
+        unless ( $svc ) {
+            Proximo::warn( 'Service %s not defined in set.', $svc_name );
+            return undef;
+        }
+        
+        return $svc;
+    };
+
     # this is a very straightforward pattern match on commands...
     if ( $cmd =~ /^create\s+service\s+([\w\d]+)$/i ) {
         my $name = $1;
+
+        # make a new service
         Proximo::info( 'Creating service %s.', $name );
-        $ctx->{cur_service_name} = $name;
+        my $svc = Proximo::Service->new( $name );
+        $ctx->{cur_service} = $svc;
 
     # setting the value of something
     } elsif ( $cmd =~ /^(?:([\w\d]+)\.)?([\w\d]+)\s*=\s*(.+)$/ ) {
-        my ( $svc, $name, $val ) = ( $1, $2, $3 );
-        $svc ||= $ctx->{cur_service_name};
-        Proximo::fatal( 'Unable to determine service to set %s on.', $name )
-            unless $svc;
+        my ( $svc_name, $name, $val ) = ( $1, $2, $3 );
 
-    } elsif ( $cmd =~ /^enable\s+([\w\d]+)$/i ) {
+        # try to get the name if we can
+        $svc_name ||= $ctx->{cur_service}->name
+            if $ctx->{cur_service};
+
+        # now set
+        my $svc = $svc_from_name->( $svc_name )
+            or return undef;
+        $svc->set( $name, $val );
+
+    } elsif ( $cmd =~ /^enable(?:\s+([\w\d]+))?$/i ) {
         my $name = $1;
+        $name ||= $ctx->{cur_service}->name
+            if $ctx->{cur_service};
+        my $svc = $svc_from_name->( $name )
+            or return undef;
+
+        $svc->enable;
 
     } else {
         Proximo::warn( 'Unknown configuration command: %s', $cmd );
