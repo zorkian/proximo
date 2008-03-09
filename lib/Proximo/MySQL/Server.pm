@@ -161,4 +161,15 @@ sub backend {
     return $self->{backend};
 }
 
+# if we get closed, make sure to nuke a backend
+sub close {
+    my Proximo::MySQL::Server $self = $_[0];
+
+    if ( $self->backend ) {
+        $self->backend->close( 'upstream_close' );
+    }
+    
+    $self->SUPER::close( @_ );
+}
+
 1;
