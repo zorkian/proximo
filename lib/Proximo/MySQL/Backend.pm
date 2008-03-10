@@ -112,15 +112,80 @@ sub event_packet {
 
     # when we get a response in this state, we can send it to the client
     } elsif ( $self->state eq 'wait_response' ) {
-        # FIXME: this needs to be done in a non-manual way.  this is just a hack to see the whole
-        # thing working...!
+        # four possible responses in this case, let's see what we got
+        my $val = unpack( 'C', substr( $$packet_raw, 0, 1 ) );
+        
+        # OK happens if we have no result set
+        my $packet;
+        if ( $val == PEEK_OK ) {
+            $self->state( 'wait_client' );
+            $packet = Proximo::MySQL::Packet::OK->new_from_raw( $seq, $packet_raw );
+            Proximo::debug( 'Result OK: server status = %d, affected rows = %d, insert id = %d, warnings = %d, message = %s.',
+                            $packet->server_status, $packet->affected_rows, $packet->insert_id, $packet->warning_count,
+                            $packet->message || '(none)' );
+
+        # ERROR packets indicate ... an error
+        } elsif ( $val == PEEK_ERROR ) {
+            $packet = Proximo::MySQL::Packet::Error->new_from_raw( $seq, $packet_raw );
+            Proximo::debug( 'Result ERROR: error number = %d, SQL state = %s, message = %s.',
+                            $packet->error_number, $packet->sql_state, $packet->message );
+
+        # it should never be an EOF packet
+        } elsif ( $val == PEEK_EOF ) { 
+            Proximo::warn( 'Backend got EOF packet in wait_response state.' );
+            return $self->close( 'unexpected_packet' );
+
+        # else it's the beginning of a fieldset
+        } else {
+            # FIXME: need new_from_raw for this type of packet
+            #my $packet = Proximo::MySQL::Packet::
+            $self->state( 'recv_fields' );
+
+        }
+
+        # FIXME: this is manual tweaking we should be able to get rid of.
+        if ( defined $packet ) {
+            $self->server->_send_packet( $packet );
+
+        } else {
+            my $buf = substr( pack( 'V', length( $$packet_raw ) ), 0, 3) . chr( $seq ) . $$packet_raw;
+            $self->server->write( \$buf );
+            $self->server->watch_write( 1 );
+        }
+
+    # in this state, the server is sending fields at us
+    } elsif ( $self->state eq 'recv_fields' ) {
+        # decode peek value
+        my $val = unpack( 'C', substr( $$packet_raw, 0, 1 ) );
+        
+        # if this is an EOF packet, set our state
+        if ( $val == PEEK_EOF ) {
+            $self->state( 'recv_rows' );
+        }
+
+        # FIXME: this is manual and shouldn't be done this way
         my $buf = substr( pack( 'V', length( $$packet_raw ) ), 0, 3) . chr( $seq ) . $$packet_raw;
         $self->server->write( \$buf );
         $self->server->watch_write( 1 );
+
+    # server is blasting actual row data at us
+    } elsif ( $self->state eq 'recv_rows' ) {
+        # decode peek value
+        my $val = unpack( 'C', substr( $$packet_raw, 0, 1 ) );
         
+        # if this is an EOF packet, set our state
+        if ( $val == PEEK_EOF ) {
+            $self->state( 'wait_client' );
+        }
+        
+        # FIXME: this is manual and shouldn't be done this way
+        my $buf = substr( pack( 'V', length( $$packet_raw ) ), 0, 3) . chr( $seq ) . $$packet_raw;
+        $self->server->write( \$buf );
+        $self->server->watch_write( 1 );
+
     # haven't put in any handling for this state?
     } else {
-        Proximo::fatal( 'Received packet in unexpected state %s.', $self->state );
+        Proximo::fatal( 'Backend received packet in unexpected state %s.', $self->state );
         
     }
 }
@@ -140,6 +205,18 @@ sub send_packet {
 sub server {
     my Proximo::MySQL::Backend $self = $_[0];
     return $self->{server};
+}
+
+# if we get closed out...
+sub close {
+    my Proximo::MySQL::Backend $self = shift;
+
+    # if our state is currently not 
+    if ( $self->server ) {
+        $self->server->backend( undef );
+    }
+
+    $self->SUPER::close( @_ );
 }
 
 1;

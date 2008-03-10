@@ -10,7 +10,7 @@ use fields (
         'seq',      # sequence number of this packet 0-255
         'raw',      # scalar-ref to the raw packet contents
     );
-    
+
 # general purpose helper to parse a stream and make packets
 sub new_from_raw {
     my Proximo::MySQL::Packet $self = shift;
@@ -109,6 +109,10 @@ sub new_from_raw {
             push @output, substr( $$bufref, $bufpos, 13 );
             $bufpos += 13;
 
+        } elsif ( $type == P_GRAB5 ) {
+            push @output, substr( $$bufref, $bufpos, 5 );
+            $bufpos += 5;
+
         } else {
             Proximo::fatal( 'Unknown packet contents type in parse %d.', $type );
             
@@ -196,7 +200,6 @@ sub _build {
 # return the wire representation of this packet
 sub _raw {
     my Proximo::MySQL::Packet $self = shift;
-
     return $self->{raw};
 }
 
@@ -380,12 +383,12 @@ sub new_from_raw {
     my @data = $self->SUPER::new_from_raw( $seq, $bytes, P_LONG, P_LONG, P_BYTE, P_FILL23, P_NULLSTR, P_LCSTR, P_NULLSTR );
 
     # load up the data
-    $self->{client_flags} = $data[0];
+    $self->{client_flags}    = $data[0];
     $self->{max_packet_size} = $data[1];
-    $self->{charset_number} = $data[2];
-    $self->{user} = $data[4];
-    $self->{scramble} = $data[5];
-    $self->{database} = $data[6];
+    $self->{charset_number}  = $data[2];
+    $self->{user}            = $data[4];
+    $self->{scramble}        = $data[5];
+    $self->{database}        = $data[6];
 
     return $self;
 }
@@ -427,6 +430,7 @@ use base 'Proximo::MySQL::Packet';
 
 use fields (
         'errno',
+        'sqlstate',
         'message',
     );
     
@@ -453,6 +457,37 @@ sub new {
         );
 
     return $self;
+}
+
+sub new_from_raw {
+    my Proximo::MySQL::Packet::Error $self = $_[0];
+    $self = fields::new( $self ) unless ref $self;
+
+    # note the null append to make P_NULLSTR work
+    my ( $seq, $bytes ) = ( $_[1], $_[2] );
+    my @data = $self->SUPER::new_from_raw( $seq, $bytes, P_BYTE, P_SHORT, P_BYTE, P_GRAB5, P_NULLSTR );
+
+    # get data into structures
+    $self->{errno}    = $data[1];
+    $self->{sqlstate} = $data[3];
+    $self->{message}  = $data[4];
+
+    return $self;
+}
+
+sub error_number {
+    my Proximo::MySQL::Packet::Error $self = $_[0];
+    return $self->{errno};
+}
+
+sub sql_state {
+    my Proximo::MySQL::Packet::Error $self = $_[0];
+    return $self->{sqlstate};    
+}
+
+sub message {
+    my Proximo::MySQL::Packet::Error $self = $_[0];
+    return $self->{message};
 }
 
 #############################################################################
@@ -486,10 +521,10 @@ sub new {
 
     # put in arguments
     $self->{affected_rows} = shift() + 0;
-    $self->{insert_id} = shift() + 0;
+    $self->{insert_id}     = shift() + 0;
     $self->{server_status} = shift() + 0;
     $self->{warning_count} = shift() + 0;
-    $self->{message} = shift() || '';
+    $self->{message}       = shift() || '';
 
     # now put together the packet itself
     $self->_build(

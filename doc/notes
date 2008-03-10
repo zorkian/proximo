@@ -1,0 +1,30 @@
+just doodling some config ideas for various setups...
+
+# setup a master-master setup, this could technically have as many
+# masters as you want.  with this setup, queries will only go to one
+# machine from the list, if that machine goes down then we will start
+# sending queries to a different machine and stop using the first one.
+ 
+create mysql cluster mymastermaster
+  setup = all-master
+  masters = x:a, y:b, z:c
+  behavior = one-at-a-time
+
+# or you could say to split traffic among the databases...
+
+  behavior = split
+
+# but if you wanted to define a master/slave setup, you could do something like
+# this... which drives traffic to your slaves, and writes to the master.  note
+# that we are not including the master for reads.  which is something you might
+# want to do if you have only a single slave, for example.
+
+create mysql cluster mymasterslave
+  setup = master-slave
+  master = x:a
+  slaves = y:b, z:c
+  behavior = split
+  include_master_for_reads = no
+
+# what are some other setups?  a ring topology?  well, in that case it's
+# kind of all masters...

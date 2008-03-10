@@ -92,7 +92,7 @@ sub event_packet {
 
             $self->_make_simple_result(
                     $packet->sequence_number + 1,
-                    [ 'shell command' ],
+                    [ 'results' ],
                     @out,
                 );
             return;

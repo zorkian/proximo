@@ -113,6 +113,7 @@ use constant SET_FLAG               => 2048;
 use constant NO_DEFAULT_VALUE_FLAG  => 4096;
 use constant NUM_FLAG               => 32768;
 
+# this section references the concept of lame a lot.  my bad.
 use constant P_BYTE => 1;    # byte
 use constant P_SHORT => 2;   # short (2 bytes)
 use constant P_LONG => 3;    # long (4 bytes)
@@ -124,6 +125,11 @@ use constant P_LCBIN => 8;   # length coded binary
 use constant P_GRAB8 => 9;   # grab 8 bytes (lame lame lame)
 use constant P_GRAB13 => 10; # grab 13 bytes (more lameness)
 use constant P_FILL13 => 11; # bleh, you get the idea
+use constant P_GRAB5 => 12;  # 5 bytes (lame sauce GO)
+
+use constant PEEK_OK    => 0;   # first byte of an OK packet
+use constant PEEK_ERROR => 255; #   ""             error packet
+use constant PEEK_EOF   => 254; #   ""             EOF packet
 
 @ISA = qw( Exporter );
 
@@ -246,6 +252,11 @@ use constant P_FILL13 => 11; # bleh, you get the idea
     P_GRAB8
     P_GRAB13
     P_FILL13
+    P_GRAB5
+    
+    PEEK_OK
+    PEEK_ERROR
+    PEEK_EOF
 );
 
 1;
