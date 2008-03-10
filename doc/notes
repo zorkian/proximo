@@ -28,3 +28,29 @@ create mysql cluster mymasterslave
 
 # what are some other setups?  a ring topology?  well, in that case it's
 # kind of all masters...
+
+=====================
+
+and now talking about how to organize the clusters in the code... does it make
+sense for the think receiving queries to be responsible for sending them out?  or
+should there be a separate class that has smarts about what it's doing and can
+do the proper thing?
+
+so the way I'm thinking is, there's a P::M::Cluster module, that basically is
+used as a way of defining what a cluster does.  then we have the same but as
+P::M::Cluster::Instance which is an instantiation of the above and is used for
+keeping state.
+
+this Instance class is then responsible for allocating any Backends that it needs
+to connect to.  it owns them then.  we don't do connection pooling at this point
+so this is okay, when we're done we can just disconnect them.  (future improvement
+is to do proper pooling.)
+
+I -think- this is going to work out well... then we can have proper logic in the
+Cluster module for doing all sorts of things like deciding where to send traffic
+based on the state of what's going on.  this also allows the user to drop in all
+sorts of replacements on where to send the queries, if they wanted.
+
+for example, they could totally not use a mysql cluster backend and could instead
+use a postgres backend and setup a plugin or something to do the right thing with
+regards to rewriting queries and the like...

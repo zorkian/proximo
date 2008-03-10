@@ -73,7 +73,7 @@ sub exec_management_command {
         }
 
     # setting the value of something
-    } elsif ( $cmd =~ /^(?:([\w\d]+)\.)?([\w\d]+)\s*=\s*(.+)$/ ) {
+    } elsif ( $cmd =~ /^(?:set\s+)?(?:([\w\d]+)\.)?([\w\d]+)\s*=\s*(.+)$/i ) {
         my ( $svc_name, $name, $val ) = ( $1, $2, $3 );
 
         # try to get the name if we can

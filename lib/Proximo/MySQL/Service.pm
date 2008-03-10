@@ -39,7 +39,7 @@ sub new {
 
 # take in a socket and create a server for it
 sub take_accepted_connection {
-    Proximo::MySQL::Server->new( @_ );
+    Proximo::MySQL::Client->new( @_ );
 }
 
 # attempt to enable a service, which basically means that we will start
@@ -94,7 +94,7 @@ sub set {
 # called by Server connections when they need a backend connection
 sub need_backend {
     my Proximo::MySQL::Service $self = $_[0];
-    my Proximo::MySQL::Server $srvr = $_[1];
+    my Proximo::MySQL::Client $srvr = $_[1];
 
     # debug
     Proximo::debug( 'Spawning new backend to %s.', $self->proxy_to );

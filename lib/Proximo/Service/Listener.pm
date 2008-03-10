@@ -4,7 +4,7 @@ package Proximo::Service::Listener;
 
 use strict;
 use IO::Socket::INET;
-use Proximo::MySQL::Server;
+use Proximo::MySQL::Client;
 use Proximo::Management::Server;
 use Proximo::Socket;
 use Socket;

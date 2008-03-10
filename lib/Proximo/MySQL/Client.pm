@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 
-package Proximo::MySQL::Server;
+package Proximo::MySQL::Client;
 
 use strict;
 use Proximo::MySQL::Connection;
@@ -16,7 +16,7 @@ use fields (
 # construct a new server connection, this is the connection between us
 # and the user, whoever they may be
 sub new {
-    my Proximo::MySQL::Server $self = shift;
+    my Proximo::MySQL::Client $self = shift;
     $self = fields::new( $self ) unless ref $self;
 
     # initialize the work via our parent
@@ -38,7 +38,7 @@ sub new {
 # when we're writable, we probably need to do something that involves sending out
 # a new or a queued packet...
 sub event_write {
-    my Proximo::MySQL::Server $self = shift;
+    my Proximo::MySQL::Client $self = shift;
 
     # we've just begin, send handshake
     if ( $self->state eq 'init' ) {
@@ -54,7 +54,7 @@ sub event_write {
 
 # called when we get a packet from the client
 sub event_packet {
-    my Proximo::MySQL::Server $self = shift;
+    my Proximo::MySQL::Client $self = shift;
 
     my ( $seq, $packet_raw ) = @_;
     Proximo::debug( 'Server processing packet with sequence %d of length %d bytes.', $seq, length( $$packet_raw ) );
@@ -131,7 +131,7 @@ sub event_packet {
 # called when a backend has connected and is available, we can send queries through
 # from the queue using this 
 sub backend_available {
-    my Proximo::MySQL::Server $self = $_[0];
+    my Proximo::MySQL::Client $self = $_[0];
     my Proximo::MySQL::Backend $be = $_[1];
 
     # if we have a queue, great...
@@ -145,7 +145,7 @@ sub backend_available {
 # used to send a handshake to the user.  preconditions: we're writable, and we're
 # in the 'init' state... so we're just going to assume that's true and move on
 sub _send_handshake {
-    my Proximo::MySQL::Server $self = shift;
+    my Proximo::MySQL::Client $self = shift;
 
     Proximo::debug( "Server sending welcome handshake to connecting client." );
 
@@ -161,13 +161,13 @@ sub _send_handshake {
 
 # return ref to our queue
 sub backend_queue {
-    my Proximo::MySQL::Server $self = $_[0];
+    my Proximo::MySQL::Client $self = $_[0];
     return $self->{backend_queue};
 }
 
 # get/set our backend
 sub backend {
-    my Proximo::MySQL::Server $self = $_[0];
+    my Proximo::MySQL::Client $self = $_[0];
     if ( scalar( @_ ) == 2 ) {
         return $self->{backend} = $_[1];
     }
@@ -176,12 +176,10 @@ sub backend {
 
 # if we get closed, make sure to nuke a backend
 sub close {
-    my Proximo::MySQL::Server $self = $_[0];
-
+    my Proximo::MySQL::Client $self = $_[0];
     if ( $self->backend ) {
         $self->backend->close( 'upstream_close' );
     }
-    
     $self->SUPER::close( @_ );
 }
 
