@@ -17,7 +17,7 @@ sub load_config_file {
         or Proximo::fatal( 'Failed opening configuration file: ##' );
 
     # now execute each line
-    my $ctx = {};
+    my $ctx = { errors_fatal => 1 };
     while (<FILE>) {
         s/[\r\n]+$//;
         s/\s*#.*$//;
@@ -40,6 +40,11 @@ sub exec_management_command {
     if ( ref $cmd ) {
         ( $ctx, $cmd ) = ( $cmd, shift );
     }
+
+    # FIXME: the management command system is really not well done, Perlbal does this
+    # much better... might want to get some tips there.  the big thing is that we need
+    # to send errors back to the client who is issuing the commands instead of just
+    # having them see 'Failed.'
 
     # helper for getting a service name
     my $svc_from_name = sub {
@@ -72,6 +77,8 @@ sub exec_management_command {
             return Proximo::warn( 'Service type %s unknown to create service named %s.', $type, $name );
         }
 
+        return 1;
+
     # setting the value of something
     } elsif ( $cmd =~ /^(?:set\s+)?(?:([\w\d]+)\.)?([\w\d]+)\s*=\s*(.+)$/i ) {
         my ( $svc_name, $name, $val ) = ( $1, $2, $3 );
@@ -83,8 +90,9 @@ sub exec_management_command {
         # now set
         my $svc = $svc_from_name->( $svc_name )
             or return undef;
-        $svc->set( $name, $val );
+        return $svc->set( $name, $val );
 
+    # turning a service on or off
     } elsif ( $cmd =~ /^enable(?:\s+([\w\d]+))?$/i ) {
         my $name = $1;
 
@@ -95,12 +103,17 @@ sub exec_management_command {
             or return undef;
 
         # main screen turn on (comment OCD strikes again)
-        $svc->enable;
+        return $svc->enable;
 
     } else {
-        Proximo::warn( 'Unknown configuration command: %s.', $cmd );
-
+        if ( $ctx->{errors_fatal} ) {
+            Proximo::fatal( 'Unknown configuration command: %s.', $cmd );
+        } else {
+            return Proximo::warn( 'Unknown configuration command: %s.', $cmd );
+        }
     }
+
+    return Proximo::warn( 'Management executor fell through to bottom.' );
 }
 
 1;

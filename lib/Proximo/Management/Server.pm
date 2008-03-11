@@ -7,6 +7,7 @@ use Proximo::Socket;
 use base 'Proximo::Socket';
 
 use fields (
+        'ctx',  # context for sending commands to the configurator
     );
 
 # construct a new server connection, this is the connection between us
@@ -17,6 +18,9 @@ sub new {
 
     # initialize the work via our parent
     $self->SUPER::new( @_ );
+
+    # self init
+    $self->{ctx} = {};
 
     # wait for user to send us something
     $self->watch_read( 1 );
@@ -40,9 +44,19 @@ sub event_read {
             }
             $self->write_line( '---' );
 
-        # lame, they are sending junk
+        # list out defined services
+        # FIXME: put more detail here :-)
+        } elsif ( $line =~ /^show\s+serv/ ) {
+            my $svcs = Proximo::Service->GetServices;
+            foreach my $svc_name ( sort { $a cmp $b } keys %$svcs ) {
+                $self->write_line( '%s: %s', $svc_name, $svcs->{$svc_name} );
+            }
+            $self->write_line( '---' );
+
+        # maybe it's a configuration command, try that
         } else {
-            $self->write_line( "Unknown command: $line" );
+            my $rv = Proximo::Configuration::exec_management_command( $self->{ctx}, $line );
+            $self->write_line( $rv ? 'Ok.' : 'Failed.' );
 
         }
     }
