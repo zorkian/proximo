@@ -27,16 +27,10 @@ sub new {
 
     # arguments are name, and that's about it
     my $name = shift;
-    unless ( $name ) {
-        Proximo::warn( 'Attempted to create a service with no name!' );
-        return undef;
-    }        
-
-    # error check
-    if ( exists $Services{$name} ) {
-        Proximo::warn( 'Attempted to redeclare service with name %s.', $name );
-        return undef;
-    }    
+    return Proximo::warn( 'Attempted to create a service with no name!' )
+        unless $name;
+    return Proximo::warn( 'Attempted to redeclare service with name %s.', $name )
+        if exists $Services{$name};
 
     # get input arguments and setup
     $self->{name}       = $name;
@@ -45,7 +39,7 @@ sub new {
 
     # store this service and note it's been built
     $Services{$self->name} = $self;
-    Proximo::debug( 'Proximo::Service named %s constructed.', $self->name );
+    Proximo::debug( 'Service named %s constructed.', $self->name );
 
     return $self;
 }

@@ -3,6 +3,7 @@
 package Proximo::Configuration;
 
 use strict;
+use Proximo::MySQL::Cluster;
 use Proximo::MySQL::Service;
 use Proximo::Management::Service;
 
@@ -46,21 +47,19 @@ sub exec_management_command {
     # to send errors back to the client who is issuing the commands instead of just
     # having them see 'Failed.'
 
-    # helper for getting a service name
+    # helper for getting a service name, can also return a cluster, both use the same
+    # syntax for SET commands so this works okay
     my $svc_from_name = sub {
         my $svc_name = shift;
-        unless ( $svc_name ) {
-            Proximo::warn( 'Unable to determine service to use for management command.' );
-            return undef;
-        }
+        return Proximo::warn( 'Unable to determine service to use for management command.' )
+            unless $svc_name;
 
-        # now get the service
-        my $svc = Proximo::Service->GetServiceByName( $svc_name );
-        unless ( $svc ) {
-            Proximo::warn( 'Service %s not defined in set.', $svc_name );
-            return undef;
-        }
-        
+        # now get the service or the cluster
+        my $svc = Proximo::Service->GetServiceByName( $svc_name ) ||
+                  Proximo::Cluster->GetClusterByName( $svc_name );
+        return Proximo::warn( 'No service or cluster named %s defined.', $svc_name )
+            unless $svc;
+
         return $svc;
     };
 
@@ -75,6 +74,19 @@ sub exec_management_command {
             $ctx->{cur_service} = Proximo::Management::Service->new( $name );
         } else {
             return Proximo::warn( 'Service type %s unknown to create service named %s.', $type, $name );
+        }
+
+        return 1;
+    
+    # create a cluster
+    } elsif ( $cmd =~ /^create\s+(\w+?)\s+cluster\s+([\w\d]+)$/i ) {
+        my ( $type, $name ) = ( lc $1, $2 );
+
+        # make a new service
+        if ( $type eq 'mysql' ) {
+            $ctx->{cur_service} = Proximo::MySQL::Cluster->new( $name );
+        } else {
+            return Proximo::warn( 'Cluster type %s unknown to create cluster named %s.', $type, $name );
         }
 
         return 1;

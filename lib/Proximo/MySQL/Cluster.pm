@@ -7,10 +7,16 @@
 # this module is responsible for handling logic about where to send incoming
 # queries, when to connect new backends, etc.
 
+# forward declaration to make fields happy
+package Proximo::MySQL::Cluster::Instance;
+
+# now back to your regularly scheduled package
 package Proximo::MySQL::Cluster;
 
 use strict;
 use Proximo::Cluster;
+use Proximo::MySQL::Backend;
+use Proximo::MySQL::Client;
 use base 'Proximo::Cluster';
 
 use fields (
@@ -27,7 +33,7 @@ sub new {
     $self = fields::new( $self ) unless ref $self;
 
     # init parent
-    $self->SUPER::new( @_ );
+    $self->SUPER::new( $_[1] );
 
     # self variables
     $self->{setup}    = 'single';
@@ -123,6 +129,29 @@ sub slave_count {
     return scalar( @{ $self->{slaves} } );
 }
 
+# takes in a query and does something with it, notably executing it ideally
+sub query {
+    my Proximo::MySQL::Cluster $self = $_[0];
+    my Proximo::MySQL::Cluster::Instance $instance = $_[1];
+    my $q_ref = $_[2];
+
+    # one of two things happens, either we are in a mode that requires us to be
+    # sticky on the backend, or we can get whatever is available
+    if ( $instance->sticky ) {
+        my $be = $instance->backend;
+
+        # should never happen, if so this is a bad error case
+        unless ( $be ) {
+            Proximo::warn( 'Client with sticky flag has no backend.  Bailing!' );
+            $self->close( 'sticky_no_backend' );
+            return undef;
+        }
+
+        # okay, pass this to our backend
+        #$be->
+    }
+}
+
 #############################################################################
 #############################################################################
 #############################################################################
@@ -134,6 +163,8 @@ use strict;
 use fields (
         'cluster',   # P::M::Cluster object
         'client',    # P::M::Client object
+        'backend',   # P::M::Backend object
+        'sticky',    # 1/0; if we should be stuck to our backend
     );
 
 # construct a new instance for somebody
@@ -144,6 +175,8 @@ sub new {
     # get parameters
     $self->{cluster} = $_[1];
     $self->{client}  = $_[2];
+    $self->{backend} = undef;
+    $self->{sticky}  = 0;
 
     # all good
     return $self;
@@ -159,6 +192,31 @@ sub client {
 sub cluster {
     my Proximo::MySQL::Cluster::Instance $self = $_[0];
     return $self->{cluster};
+}
+
+# get/set our backend
+sub backend {
+    my Proximo::MySQL::Cluster::Instance $self = $_[0];
+    if ( scalar( @_ ) == 2 ) {
+        return $self->{backend} = $_[1];
+    }
+    return $self->{backend};
+}
+
+# get/set the sticky bit
+sub sticky {
+    my Proximo::MySQL::Cluster::Instance $self = $_[0];
+    if ( scalar( @_ ) == 2 ) {
+        return $self->{sticky} = $_[1];
+    }
+    return $self->{sticky};
+}
+
+# called when the client has sent a query for us to handle, this simply asks the
+# cluster what to do with it...
+sub query {
+    my Proximo::MySQL::Cluster::Instance $self = $_[0];
+    return $self->cluster->query( $self, $_[1] );
 }
 
 1;

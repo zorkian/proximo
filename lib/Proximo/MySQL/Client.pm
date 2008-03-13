@@ -10,6 +10,7 @@ use base 'Proximo::MySQL::Connection';
 
 use fields (
         'backend',        # Proximo::MySQL::Backend object that is 'ours'
+        'cluster_inst',   # P::M::Cluster::Instance object
         'backend_queue',  # queue of packets ready to go to a backend when we get one
     );
 
@@ -26,6 +27,7 @@ sub new {
     $self->{mode}    = 1;        # server mode
     $self->{state}   = 'init';   # initial state
     $self->{backend} = undef;
+    $self->{cluster_inst}  = undef;
     $self->{backend_queue} = []; # packet queue
 
     # protocol dictates that we are responsible for sending a greeting to begin

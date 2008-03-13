@@ -31,13 +31,13 @@ sub new {
             Listen => 1024,
             ReuseAddr => 1,
         );
-    Proximo::fatal( "Failed to listen on $listen: ##" )
+    Proximo::fatal( 'Failed to listen on %s: ##.', $listen )
         unless $sock;
-    Proximo::info( "Server listening on $listen." );
+    Proximo::debug( 'Server listening on %s.', $listen );
 
     # try to make this non-blocking
     IO::Handle::blocking( $sock, 0 )
-        or Proximo::fatal( "Unable to make listener non-blocking: ##" );
+        or Proximo::fatal( 'Unable to make listener non-blocking: ##.' );
 
     # now we can do this final setup, we delayed it earlier...
     $self->SUPER::new( $service, $sock );
@@ -54,7 +54,7 @@ sub new {
 sub event_read {
     my Proximo::Service::Listener $self = $_[0];
 
-    Proximo::debug( "One or more connections are available to accept." );
+    Proximo::debug( 'One or more connections are available to accept.' );
 
     while ( my ( $sock, $addr ) = $self->{sock}->accept ) {
         # disable blocking

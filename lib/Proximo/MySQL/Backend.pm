@@ -31,7 +31,7 @@ sub new {
     # setup the socket
     my $sock;
     socket $sock, PF_INET, SOCK_STREAM, IPPROTO_TCP;
-    return Proximo::warn( 'Failed creating socket: ##' )
+    return Proximo::warn( 'Failed creating socket: ##.' )
         unless $sock && defined fileno( $sock );
 
     # get structures
