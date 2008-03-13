@@ -20,9 +20,6 @@ sub new {
     my Proximo::Socket $self = shift;
     $self = fields::new( $self ) unless ref $self;
 
-    # debug output
-    Proximo::debug( 'Proximo::Socket construction beginning.' );
-
     # store the information on the remote end for later
     my ( $srvc, $sock, $addr ) = @_;
 

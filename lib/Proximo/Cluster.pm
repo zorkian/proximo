@@ -49,6 +49,12 @@ sub name {
     return $self->{name};
 }
 
+# enable ... does nothing, we are always enabled
+# FIXME: maybe want to make this not true, allow enabling/disabling a cluster?
+sub enable {
+    return 1;
+}
+
 # called by the management console to set various attributes
 sub set {
     my Proximo::Cluster $self = $_[0];

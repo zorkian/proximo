@@ -33,7 +33,6 @@ sub new {
         );
     Proximo::fatal( 'Failed to listen on %s: ##.', $listen )
         unless $sock;
-    Proximo::debug( 'Server listening on %s.', $listen );
 
     # try to make this non-blocking
     IO::Handle::blocking( $sock, 0 )

@@ -31,9 +31,6 @@ sub new {
     # now create from our parent
     $self->SUPER::new( @_ );
 
-    # store this service and note it's been built
-    Proximo::debug( 'Proximo::MySQL::Service named %s constructed.', $self->name );
-
     return $self;
 }
 
