@@ -24,9 +24,9 @@ sub new {
     $self->SUPER::new( @_ );
 
     # set some internal shizzle
-    $self->{mode}    = 1;        # server mode
-    $self->{state}   = 'init';   # initial state
-    $self->{backend} = undef;
+    $self->{mode}          = 1;        # server mode
+    $self->{state}         = 'init';   # initial state
+    $self->{backend}       = undef;
     $self->{cluster_inst}  = undef;
     $self->{backend_queue} = []; # packet queue
 
@@ -179,10 +179,19 @@ sub backend {
 # if we get closed, make sure to nuke a backend
 sub close {
     my Proximo::MySQL::Client $self = $_[0];
+
+    # notify our backend that they should die, if we have one
     if ( $self->backend ) {
         $self->backend->close( 'upstream_close' );
     }
-    $self->SUPER::close( @_ );
+
+    # ditch links to things to reduce the odds that we leak memory
+    $self->{backend}       = undef;
+    $self->{cluster_inst}  = undef;
+    $self->{backend_queue} = undef;
+
+    # proxy up
+    return $self->SUPER::close( @_ );
 }
 
 1;

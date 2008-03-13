@@ -12,7 +12,7 @@ use Socket qw/ PF_INET IPPROTO_TCP SOCK_STREAM SOL_SOCKET SO_ERROR
 use base 'Proximo::MySQL::Connection';
 
 use fields (
-        'server',   # our P::M::Server object
+        'client',   # our P::M::Client object
     );
     
 # construction is fun for you and me
@@ -21,7 +21,7 @@ sub new {
     $self = fields::new( $self ) unless ref $self;
 
     # arguments
-    my ( $svc, $server ) = ( $_[1], $_[2] );
+    my ( $svc, $client ) = ( $_[1], $_[2] );
 
     # get where we're proxying to
     my $ipport = $svc->proxy_to;
@@ -44,20 +44,20 @@ sub new {
     IO::Handle::blocking( $sock, 0 );
     connect $sock, $addr;
 
-    # save our server
-    $self->{server} = $server;
+    # save our client
+    $self->{client} = $client;
 
     # initialize the work via our parent
     $self->SUPER::new( $svc, $sock, $addr );
 
     # now turn on watching for reads, as the first thing that happens is
     # the server will send us a packet saying "hey what's up my name's bob"
-    $self->current_database( $self->server->current_database );
+    $self->current_database( $self->client->current_database );
     $self->state( 'connecting' );
     $self->watch_read( 1 );
 
     # and now, we belong to you
-    $self->server->backend( $self );
+    $self->client->backend( $self );
 
     return $self;
 }
@@ -92,7 +92,7 @@ sub event_packet {
             $self->state( 'idle' );
 
             # okay, now let's inform the server
-            $self->server->backend_available( $self );
+            $self->client->backend_available( $self );
 
         # error packet
         } elsif ( $peek == 255 ) {
@@ -102,7 +102,7 @@ sub event_packet {
             # FIXME: is this right?  I'm too tired to really think if this is the proper thing
             # to do in this case.  test, test...
             $self->close( 'error' );
-            $self->server->close( 'error' );
+            $self->client->close( 'error' );
 
         # something else
         } else {
@@ -145,12 +145,12 @@ sub event_packet {
 
         # FIXME: this is manual tweaking we should be able to get rid of.
         if ( defined $packet ) {
-            $self->server->_send_packet( $packet );
+            $self->client->_send_packet( $packet );
 
         } else {
             my $buf = substr( pack( 'V', length( $$packet_raw ) ), 0, 3) . chr( $seq ) . $$packet_raw;
-            $self->server->write( \$buf );
-            $self->server->watch_write( 1 );
+            $self->client->write( \$buf );
+            $self->client->watch_write( 1 );
         }
 
     # in this state, the server is sending fields at us
@@ -165,8 +165,8 @@ sub event_packet {
 
         # FIXME: this is manual and shouldn't be done this way
         my $buf = substr( pack( 'V', length( $$packet_raw ) ), 0, 3) . chr( $seq ) . $$packet_raw;
-        $self->server->write( \$buf );
-        $self->server->watch_write( 1 );
+        $self->client->write( \$buf );
+        $self->client->watch_write( 1 );
 
     # server is blasting actual row data at us
     } elsif ( $self->state eq 'recv_rows' ) {
@@ -180,8 +180,8 @@ sub event_packet {
         
         # FIXME: this is manual and shouldn't be done this way
         my $buf = substr( pack( 'V', length( $$packet_raw ) ), 0, 3) . chr( $seq ) . $$packet_raw;
-        $self->server->write( \$buf );
-        $self->server->watch_write( 1 );
+        $self->client->write( \$buf );
+        $self->client->watch_write( 1 );
 
     # haven't put in any handling for this state?
     } else {
@@ -201,10 +201,10 @@ sub send_packet {
     return 1;
 }
 
-# return the server
-sub server {
+# return the client
+sub client {
     my Proximo::MySQL::Backend $self = $_[0];
-    return $self->{server};
+    return $self->{client};
 }
 
 # if we get closed out...
@@ -212,8 +212,8 @@ sub close {
     my Proximo::MySQL::Backend $self = shift;
 
     # if our state is currently not 
-    if ( $self->server ) {
-        $self->server->backend( undef );
+    if ( $self->client ) {
+        $self->client->backend( undef );
     }
 
     $self->SUPER::close( @_ );
