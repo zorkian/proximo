@@ -10,7 +10,7 @@ use strict;
 use fields (
         'name',    # name of this cluster
     );
-    
+
 # constructs a new cluster for people to use.  only one of these should be created
 # per cluster defined, not one per connection (see the Instance classes)
 sub new {
@@ -39,7 +39,7 @@ sub set {
     # we actually don't have anything we set right now, but
     # it's possible we will in the future, so we expect the subclasses
     # to call up to us...
-    return 1;
+    return Proximo::warn( 'Unable to set key %s on Cluster instance.', $key );
 }
 
 1;
