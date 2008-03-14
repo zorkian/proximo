@@ -40,7 +40,7 @@ sub analyze {
     # FIXME: this is retarded logic, we should probably make this somewhat more complicated
     # and detect more cases... oh well, I don't think it matters TOO much, as long as we get
     # 90% of the queries we're good...
-    if ( $$self->{raw_qref} =~ /^\s*SELECT.*?(GET_LOCK|RELEASE_LOCK)?.*?(FOR\s+UPDATE|LOCK\s+IN\s+SHARE\s+MODE)?.*$/i ) {
+    if ( ${ $self->{raw_qref} } =~ /^\s*SELECT.*?(GET_LOCK|RELEASE_LOCK)?.*?(FOR\s+UPDATE|LOCK\s+IN\s+SHARE\s+MODE)?.*$/i ) {
         # it may be a write if we have $1/$2
         if ( $1 || $2 ) {
             Proximo::debug( 'Query suspected a write: %s, %s.', $1 || '(undef)', $2 || '(undef)' );
