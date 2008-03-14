@@ -12,7 +12,7 @@ use Socket qw/ PF_INET IPPROTO_TCP SOCK_STREAM SOL_SOCKET SO_ERROR
 use base 'Proximo::MySQL::Connection';
 
 use fields (
-        'client',   # our P::M::Client object
+        'cluster_inst',   # our P::M::Cluster::Instance object
     );
     
 # construction is fun for you and me
@@ -21,7 +21,7 @@ sub new {
     $self = fields::new( $self ) unless ref $self;
 
     # arguments
-    my ( $svc, $client ) = ( $_[1], $_[2] );
+    my ( $svc, $clust ) = ( $_[1], $_[2] );
 
     # get where we're proxying to
     my $ipport = $svc->proxy_to;
@@ -44,22 +44,28 @@ sub new {
     IO::Handle::blocking( $sock, 0 );
     connect $sock, $addr;
 
-    # save our client
-    $self->{client} = $client;
+    # save our cluster instance
+    $self->{cluster_inst} = $clust;
 
     # initialize the work via our parent
     $self->SUPER::new( $svc, $sock, $addr );
 
     # now turn on watching for reads, as the first thing that happens is
     # the server will send us a packet saying "hey what's up my name's bob"
-    $self->current_database( $self->client->current_database );
+    $self->current_database( $self->inst->client->current_database );
     $self->state( 'connecting' );
     $self->watch_read( 1 );
 
     # and now, we belong to you
-    $self->client->backend( $self );
+    $self->inst->client->backend( $self );
 
     return $self;
+}
+
+# return our cluster instance
+sub inst {
+    my Proximo::MySQL::Backend $self = $_[0];
+    return $self->{cluster_inst};
 }
 
 # called when we get a packet
@@ -92,7 +98,7 @@ sub event_packet {
             $self->state( 'idle' );
 
             # okay, now let's inform the server
-            $self->client->backend_available( $self );
+            $self->inst->client->backend_available( $self );
 
         # error packet
         } elsif ( $peek == 255 ) {
@@ -102,7 +108,7 @@ sub event_packet {
             # FIXME: is this right?  I'm too tired to really think if this is the proper thing
             # to do in this case.  test, test...
             $self->close( 'error' );
-            $self->client->close( 'error' );
+            $self->inst->client->close( 'error' );
 
         # something else
         } else {
@@ -145,12 +151,12 @@ sub event_packet {
 
         # FIXME: this is manual tweaking we should be able to get rid of.
         if ( defined $packet ) {
-            $self->client->_send_packet( $packet );
+            $self->inst->client->_send_packet( $packet );
 
         } else {
             my $buf = substr( pack( 'V', length( $$packet_raw ) ), 0, 3) . chr( $seq ) . $$packet_raw;
-            $self->client->write( \$buf );
-            $self->client->watch_write( 1 );
+            $self->inst->client->write( \$buf );
+            $self->inst->client->watch_write( 1 );
         }
 
     # in this state, the server is sending fields at us
@@ -165,8 +171,8 @@ sub event_packet {
 
         # FIXME: this is manual and shouldn't be done this way
         my $buf = substr( pack( 'V', length( $$packet_raw ) ), 0, 3) . chr( $seq ) . $$packet_raw;
-        $self->client->write( \$buf );
-        $self->client->watch_write( 1 );
+        $self->inst->client->write( \$buf );
+        $self->inst->client->watch_write( 1 );
 
     # server is blasting actual row data at us
     } elsif ( $self->state eq 'recv_rows' ) {
@@ -180,8 +186,8 @@ sub event_packet {
         
         # FIXME: this is manual and shouldn't be done this way
         my $buf = substr( pack( 'V', length( $$packet_raw ) ), 0, 3) . chr( $seq ) . $$packet_raw;
-        $self->client->write( \$buf );
-        $self->client->watch_write( 1 );
+        $self->inst->client->write( \$buf );
+        $self->inst->client->watch_write( 1 );
 
     # haven't put in any handling for this state?
     } else {
@@ -201,22 +207,20 @@ sub send_packet {
     return 1;
 }
 
-# return the client
-sub client {
-    my Proximo::MySQL::Backend $self = $_[0];
-    return $self->{client};
-}
-
 # if we get closed out...
 sub close {
-    my Proximo::MySQL::Backend $self = shift;
+    my Proximo::MySQL::Backend $self = $_[0];
 
-    # if our state is currently not 
-    if ( $self->client ) {
-        $self->client->backend( undef );
-    }
+    # if our state is currently not
+    my $cl = $self->inst->client;
+    $self->inst->destroy_links;
+    $self->{cluster_inst} = undef;
 
-    $self->SUPER::close( @_ );
+    # proxy this to client
+    $cl->close( $_[1] )
+        if $cl;
+
+    $self->SUPER::close( $_[1] );
 }
 
 1;

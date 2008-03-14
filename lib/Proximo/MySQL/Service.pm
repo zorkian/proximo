@@ -12,9 +12,8 @@ use Proximo::Service;
 use base 'Proximo::Service';
 
 use fields (
-        'proxy_to',     # ip:port to proxy incoming requests to
-        'proxy_user',   # username of the remote server
-        'proxy_pass',   # password of the remote server
+        'proxy_user',   # username to use on the cluster
+        'proxy_pass',   # password   "" ""
     );
 
 # construct a new Proximo server socket, this accepts new connections and
@@ -23,13 +22,12 @@ sub new {
     my Proximo::MySQL::Service $self = shift;
     $self = fields::new( $self ) unless ref $self;
 
-    # get input arguments and setup
-    $self->{proxy_to}   = undef;
-    $self->{proxy_user} = undef;
-    $self->{proxy_pass} = undef;
-
     # now create from our parent
     $self->SUPER::new( @_ );
+
+    # get input arguments and setup
+    $self->{proxy_user} = undef;
+    $self->{proxy_pass} = undef;
 
     return $self;
 }
@@ -52,12 +50,6 @@ sub enable {
     return $self->SUPER::enable;
 }
 
-# return what proxy_to is configured as
-sub proxy_to {
-    my Proximo::MySQL::Service $self = $_[0];
-    return $self->{proxy_to};
-}
-
 # return what proxy_user is configured as
 sub proxy_user {
     my Proximo::MySQL::Service $self = $_[0];
@@ -78,7 +70,7 @@ sub set {
     $key = lc $key;
 
     # now split out and set what they want
-    if ( $key =~ /^(?:proxy_to|proxy_user|proxy_pass)$/ ) {
+    if ( $key =~ /^(?:proxy_user|proxy_pass)$/ ) {
         $self->{$key} = $val;
 
     # fallback is simply to pass to our parent

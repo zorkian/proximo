@@ -14,6 +14,7 @@ use fields (
         'listen_on',  # array of what we're configured to listen on
         'listeners',  # array of objects listening for us
         'name',       # name of this service
+        'proxy_to',   # Proximo::Cluster we are using for a destination
     );
     
 # class variables
@@ -36,6 +37,7 @@ sub new {
     $self->{name}       = $name;
     $self->{listeners}  = [];
     $self->{listen_on}  = [];
+    $self->{proxy_to}   = undef;
 
     # store this service and note it's been built
     $Services{$self->name} = $self;
@@ -123,6 +125,12 @@ sub enabled {
     return $self->{enabled} ? 1 : 0;
 }
 
+# return what proxy_to is configured as
+sub proxy_to {
+    my Proximo::Service $self = $_[0];
+    return $self->{proxy_to};
+}
+
 # set some variables
 sub set {
     my Proximo::Service $self = shift;
@@ -134,6 +142,16 @@ sub set {
     if ( $key eq 'listen' ) {
         $self->listen( $val );
 
+    # set this to some cluster
+    } elsif ( $key eq 'proxy_to' ) {
+        my $cl = Proximo::Cluster->GetClusterByName( $val );
+        return Proximo::warn( 'Invalid cluster name %s.', $val )
+            unless $cl;
+
+        # save it, we're good
+        $self->{proxy_to} = $cl;
+
+    # EPIC FAIL
     } else {
         return Proximo::warn( 'Unable to determine what to do with key %s for service %s.', $key, $self->name );
 

@@ -343,7 +343,18 @@ sub sticky {
 # cluster what to do with it...
 sub query {
     my Proximo::MySQL::Cluster::Instance $self = $_[0];
-    return $self->cluster->query( $self, $_[1] );
+    return $self->cluster->query( $self, $_[1], $_[2] );
+}
+
+# close up connections
+sub destroy_links {
+    my Proximo::MySQL::Cluster::Instance $self = $_[0];
+
+    # undef all links
+    $self->{cluster} = undef;
+    $self->{client}  = undef;
+    $self->{backend} = undef;
+    return 1;
 }
 
 1;

@@ -9,9 +9,7 @@ use Proximo::MySQL::Packet;
 use base 'Proximo::MySQL::Connection';
 
 use fields (
-        'backend',        # Proximo::MySQL::Backend object that is 'ours'
         'cluster_inst',   # P::M::Cluster::Instance object
-        'backend_queue',  # queue of packets ready to go to a backend when we get one
     );
 
 # construct a new server connection, this is the connection between us
@@ -26,9 +24,16 @@ sub new {
     # set some internal shizzle
     $self->{mode}          = 1;        # server mode
     $self->{state}         = 'init';   # initial state
-    $self->{backend}       = undef;
-    $self->{cluster_inst}  = undef;
-    $self->{backend_queue} = []; # packet queue
+
+    # try to get a cluster instance
+    if ( my $cluster = $self->service->proxy_to ) {
+        $self->{cluster_inst} = $cluster->instance( $self );
+
+    # this is a bad error :(
+    } else {
+        Proximo::warn( 'Closing socket - service has no proxy_to cluster.' );
+        return $self->close( 'no_cluster_defined' );
+    }
 
     # protocol dictates that we are responsible for sending a greeting to begin
     # with, so we start writable but ignore reading
@@ -100,17 +105,8 @@ sub event_packet {
             return;
         }
 
-        # if we have a dedicated backend, let's send this on
-        if ( $self->backend ) {
-            Proximo::debug( 'Using existing backend.' );
-            $self->backend->send_packet( $packet );
-
-        # guess not, so ask service for one
-        } else {
-            push @{ $self->backend_queue }, $packet;
-            $self->service->need_backend( $self );
-
-        }
+        # pass the packet to the cluster instance for handling
+        return $self->inst->query( $packet->command_type, $packet->argument_ref );
 
         #$self->_send_packet(
         #        Proximo::MySQL::Packet::Error->new( $self, $packet->sequence_number + 1, 666, 'I can\'t do that, Dave.' ),
@@ -130,20 +126,6 @@ sub event_packet {
     }
 }
 
-# called when a backend has connected and is available, we can send queries through
-# from the queue using this 
-sub backend_available {
-    my Proximo::MySQL::Client $self = $_[0];
-    my Proximo::MySQL::Backend $be = $_[1];
-
-    # if we have a queue, great...
-    return unless @{ $self->backend_queue };
-
-    # pop the first packet
-    my $pkt = shift @{ $self->backend_queue };
-    $be->send_packet( $pkt );
-}
-
 # used to send a handshake to the user.  preconditions: we're writable, and we're
 # in the 'init' state... so we're just going to assume that's true and move on
 sub _send_handshake {
@@ -161,36 +143,26 @@ sub _send_handshake {
     $self->watch_read( 1 );
 }
 
-# return ref to our queue
-sub backend_queue {
+# return our cluster instance
+sub inst {
     my Proximo::MySQL::Client $self = $_[0];
-    return $self->{backend_queue};
-}
-
-# get/set our backend
-sub backend {
-    my Proximo::MySQL::Client $self = $_[0];
-    if ( scalar( @_ ) == 2 ) {
-        return $self->{backend} = $_[1];
-    }
-    return $self->{backend};
+    return $self->{cluster_inst};
 }
 
 # if we get closed, make sure to nuke a backend
 sub close {
     my Proximo::MySQL::Client $self = $_[0];
 
-    # notify our backend that they should die, if we have one
-    if ( $self->backend ) {
-        $self->backend->close( 'upstream_close' );
-    }
+    # save backend information, then blow away instance links
+    my $be = $self->inst->backend;
+    $self->inst->destroy_links;
+    $self->{cluster_inst} = undef;
 
-    # ditch links to things to reduce the odds that we leak memory
-    $self->{backend}       = undef;
-    $self->{cluster_inst}  = undef;
-    $self->{backend_queue} = undef;
+    # now close it
+    $be->close( $_[1] )
+        if $be;
 
-    # proxy up
+    # proxy up to the superclass
     return $self->SUPER::close( @_ );
 }
 

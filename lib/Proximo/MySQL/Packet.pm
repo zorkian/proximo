@@ -1,4 +1,10 @@
 #!/usr/bin/perl
+#
+# all of the packet formats that the MySQL protocol specifies.  handles both
+# creating new packets for output and parsing input packets.
+#
+# FIXME: would be great to fix all of the usage of shift, which slows us down
+# over time... (this is an optimization tweak.)
 
 package Proximo::MySQL::Packet;
 
@@ -615,13 +621,18 @@ sub new_from_raw {
 }
 
 sub command_type {
-    my Proximo::MySQL::Packet::Command $self = shift;
+    my Proximo::MySQL::Packet::Command $self = $_[0];
     return $self->{command};
 }
 
 sub argument {
-    my Proximo::MySQL::Packet::Command $self = shift;
+    my Proximo::MySQL::Packet::Command $self = $_[0];
     return $self->{arg};
+}
+
+sub argument_ref {
+    my Proximo::MySQL::Packet::Command $self = $_[0];
+    return \$self->{arg};
 }
 
 #############################################################################
