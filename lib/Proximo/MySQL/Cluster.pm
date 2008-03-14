@@ -273,7 +273,12 @@ sub query {
     # figure out what backend to send it to.  if we're sticky they might have a backend
     # already...
     if ( $inst->sticky ) {
-        my $be = $inst->backend;
+        my $be = $inst->backend || $self->get_readwrite_backend;
+
+    # if sticky is not on, then let's go ahead and just get them a readable backend
+    } else {
+        my $be = $self->get_readonly_backend;
+        
     }
     
 
@@ -463,6 +468,12 @@ sub query {
     my Proximo::MySQL::Cluster::Instance $self = $_[0];
     $self->{last_cmd} = time;
     return $self->cluster->query( $self, $_[1], $_[2] );
+}
+
+# called by the backend when they're ready for traffic
+sub backend_ready {
+    my Proximo::MySQL::Cluster::Instance $self = $_[0];
+    
 }
 
 # close up connections

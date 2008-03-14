@@ -181,7 +181,7 @@ sub event_packet {
         
         # if this is an EOF packet, set our state
         if ( $val == PEEK_EOF ) {
-            $self->state( 'wait_client' );
+            $self->state( 'idle' );
         }
         
         # FIXME: this is manual and shouldn't be done this way
