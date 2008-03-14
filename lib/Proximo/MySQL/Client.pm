@@ -15,11 +15,12 @@ use fields (
 # construct a new server connection, this is the connection between us
 # and the user, whoever they may be
 sub new {
-    my Proximo::MySQL::Client $self = shift;
+    my Proximo::MySQL::Client $self = $_[0];
     $self = fields::new( $self ) unless ref $self;
 
     # initialize the work via our parent
-    $self->SUPER::new( @_ );
+    my ( $srvc, $sock, $addr ) = ( $_[1], $_[2], $_[3] );
+    $self->SUPER::new( $srvc, $sock, $addr );
 
     # set some internal shizzle
     $self->{mode}          = 1;        # server mode

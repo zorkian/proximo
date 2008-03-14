@@ -34,7 +34,9 @@ sub new {
 
 # take in a socket and create a server for it
 sub take_accepted_connection {
-    Proximo::MySQL::Client->new( @_ );
+    # simply pass through to build a new client object
+    my ( $srvc, $sock, $addr ) = ( $_[0], $_[1], $_[2] );
+    Proximo::MySQL::Client->new( $srvc, $sock, $addr );
 }
 
 # attempt to enable a service, which basically means that we will start

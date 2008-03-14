@@ -17,11 +17,11 @@ use fields (
 # construct a new Proximo::Socket
 # argument: $socket
 sub new {
-    my Proximo::Socket $self = shift;
+    my Proximo::Socket $self = $_[0];
     $self = fields::new( $self ) unless ref $self;
 
     # store the information on the remote end for later
-    my ( $srvc, $sock, $addr ) = @_;
+    my ( $srvc, $sock, $addr ) = ( $_[1], $_[2], $_[3] );
 
     # if we are connected to a remote...
     if ( defined $addr ) {

@@ -17,6 +17,7 @@ use strict;
 use Proximo::Cluster;
 use Proximo::MySQL::Backend;
 use Proximo::MySQL::Client;
+use Proximo::MySQL::Query;
 use base 'Proximo::Cluster';
 
 use fields (
@@ -237,8 +238,41 @@ sub get_readonly_backend {
 # takes in a query and does something with it, notably executing it ideally
 sub query {
     my Proximo::MySQL::Cluster $self = $_[0];
-    my Proximo::MySQL::Cluster::Instance $instance = $_[1];
+    my Proximo::MySQL::Cluster::Instance $inst = $_[1];
     my ( $q_type, $q_ref ) = ( $_[2], $_[3] );
+    
+    # annotate that we've gotten this far
+    Proximo::debug( 'Cluster %s handling type=%d query=%s.', $self->name, $q_type, $$q_ref );
+
+    # if we're sticky and NOT in a transaction, then check the time of our last write
+    # to see if we can disable the sticky bit and go back to normal read handling
+    if ( $inst->sticky && ! $inst->in_transaction ) {
+        # FIXME: make this timeout configurable
+        if ( $inst->last_write_age > 5 ) {
+            # suitable, drop the sticky bit
+            Proximo::debug( 'Dropping sticky bit.' );
+            $inst->sticky( 0 );
+
+        # FIXME: probably remove this debugging too :-)
+        } else {
+            Proximo::debug( 'Maintaining sticky bit for a few more seconds.' );
+
+        }
+    }
+
+    # at this point, if the user is NOT in a transaction, see if we should start
+    # one up, based on the query contents
+    unless ( $inst->in_transaction ) {
+        # analyze the query
+        my $q = Proximo::MySQL::Query->new( $q_ref );
+        $inst->start_transaction
+            if $q->is_write;
+    }
+
+    # so by this point we know what's going on with the query, so let's actually
+    # figure out what backend to send it to.  if we're sticky they should have a
+    # backend already...
+    
 
 =pod
 
@@ -260,7 +294,7 @@ separated out into cluster logic classes... or maybe plugins?  maybe that makes
 the most sense...
 
 
-=cut
+cut
 
     # one of two things happens, either we are in a mode that requires us to be
     # sticky on the backend, or we can get whatever is available
@@ -277,6 +311,7 @@ the most sense...
         # see if we should stop being sticky
         $be->do_command( $q_type, $q_ref );
     }
+=cut
 }
 
 #############################################################################
@@ -292,6 +327,10 @@ use fields (
         'client',    # P::M::Client object
         'backend',   # P::M::Backend object
         'sticky',    # 1/0; if we should be stuck to our backend
+        'in_trans',  # 1/0; true if we are currently in a transaction
+        'last_cmd',  # timestamp of last command (client -> backend)
+        'last_pkt',  # timestamp of last packet (backend -> client)
+        'last_wrt',  # timestamp of last write command (client -> backend)
     );
 
 # construct a new instance for somebody
@@ -300,10 +339,14 @@ sub new {
     $self = fields::new( $self ) unless ref $self;
 
     # get parameters
-    $self->{cluster} = $_[1];
-    $self->{client}  = $_[2];
-    $self->{backend} = undef;
-    $self->{sticky}  = 0;
+    $self->{cluster}  = $_[1];
+    $self->{client}   = $_[2];
+    $self->{backend}  = undef;
+    $self->{sticky}   = 0;
+    $self->{in_trans} = 0;
+    $self->{last_cmd} = time;
+    $self->{last_pkt} = time;
+    $self->{last_wrt} = 0;
 
     # all good
     return $self;
@@ -330,6 +373,42 @@ sub backend {
     return $self->{backend};
 }
 
+# time of last command
+sub last_command {    
+    my Proximo::MySQL::Cluster::Instance $self = $_[0];
+    return $self->{last_cmd};
+}
+
+# return time of last packet
+sub last_packet {
+    my Proximo::MySQL::Cluster::Instance $self = $_[0];
+    return $self->{last_pkt};
+}
+
+# time of most recent activity either way
+sub last_active {
+    my Proximo::MySQL::Cluster::Instance $self = $_[0];
+    return $self->{last_pkt} > $self->{last_cmd} ? $self->{last_pkt} : $self->{last_cmd};
+}
+
+# when last write was
+sub last_write {
+    my Proximo::MySQL::Cluster::Instance $self = $_[0];
+    return $self->{last_wrt};
+}
+
+# age
+sub last_write_age {
+    my Proximo::MySQL::Cluster::Instance $self = $_[0];
+    return abs( time - ( $self->{last_wrt} || 0 ) );    
+}
+
+# note that we just sent a write query
+sub note_write_query {
+    my Proximo::MySQL::Cluster::Instance $self = $_[0];
+    return $self->{last_wrt} = time;
+}
+
 # get/set the sticky bit
 sub sticky {
     my Proximo::MySQL::Cluster::Instance $self = $_[0];
@@ -339,10 +418,46 @@ sub sticky {
     return $self->{sticky};
 }
 
+# note that we're in a transaction, automatically turns sticky on
+sub start_transaction {
+    my Proximo::MySQL::Cluster::Instance $self = $_[0];
+    return if $self->{in_trans};
+    
+    # if we're going into a transaction then go ahead and dump the current backend,
+    # as it is more than likely owned by someone who is talking to a slave or whatever
+    if ( $self->backend ) {
+        $self->cluster->adopt_backend( $self->backend );
+        $self->backend( undef );
+    }
+
+    # set internal flags and return
+    $self->{in_trans} = 1;
+    $self->{sticky}   = 1;
+    return 1;
+}
+
+# stops transaction, DOES NOT turn off sticky though, as we usually want
+# reads to be sticky for a little bit.  NOTE: we also set that the last
+# write happened now, we treat the entire transaction as a write.
+sub end_transaction {
+    my Proximo::MySQL::Cluster::Instance $self = $_[0];
+    
+    $self->{in_trans} = 0;
+    $self->{last_wrt} = time;
+    return 1;
+}
+
+# returns if we're in a transaction
+sub in_transaction {
+    my Proximo::MySQL::Cluster::Instance $self = $_[0];
+    return $self->{in_trans};
+}
+
 # called when the client has sent a query for us to handle, this simply asks the
 # cluster what to do with it...
 sub query {
     my Proximo::MySQL::Cluster::Instance $self = $_[0];
+    $self->{last_cmd} = time;
     return $self->cluster->query( $self, $_[1], $_[2] );
 }
 
