@@ -65,7 +65,7 @@ sub set {
     # we actually don't have anything we set right now, but
     # it's possible we will in the future, so we expect the subclasses
     # to call up to us...
-    return Proximo::warn( 'Unable to set key %s on Cluster instance.', $key );
+    return Proximo::warn( 'Unable to set key %s on cluster.', $key );
 }
 
 # return a service by name, capitalization this way to annotate that you can

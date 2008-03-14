@@ -233,6 +233,15 @@ sub get_readonly_backend {
     my Proximo::MySQL::Cluster $self = $_[0];
 
     # depending on mode we pull from a different area
+    return Proximo::MySQL::Backend->new( $_[1], '127.0.0.1:3306' );
+}
+
+# writes go here
+sub get_readwrite_backend {
+    my Proximo::MySQL::Cluster $self = $_[0];
+
+    # depending on mode we pull from a different area
+    return Proximo::MySQL::Backend->new( $_[1], '127.0.0.1:3306' );
 }
 
 # takes in a query and does something with it, notably executing it ideally
@@ -269,16 +278,28 @@ sub query {
             if $q->is_write;
     }
 
+    # helper sub, this does the right thing for sending a query to a particular
+    # backend, regardless of what it us
+    my $query_to = sub {
+        $inst->backend( $_[0] );
+
+        $inst->backend->queue_packet(
+                Proximo::MySQL::Packet::Command->new( $q_type, $q_ref )
+            );
+    };
+
     # so by this point we know what's going on with the query, so let's actually
     # figure out what backend to send it to.  if we're sticky they might have a backend
     # already...
     if ( $inst->sticky ) {
-        my $be = $inst->backend || $self->get_readwrite_backend;
+        # see if they have a backend already
+        $query_to->( $inst->backend ||
+                     $self->get_readwrite_backend( $inst ) );
 
     # if sticky is not on, then let's go ahead and just get them a readable backend
     } else {
-        my $be = $self->get_readonly_backend;
-        
+        $query_to->( $self->get_readonly_backend( $inst ) );
+
     }
     
 
@@ -360,6 +381,12 @@ sub new {
     return $self;
 }
 
+# shortcut to return client's service
+sub service {
+    my Proximo::MySQL::Cluster::Instance $self = $_[0];
+    return $self->{client}->service;
+}
+
 # returns our client, read only
 sub client {
     my Proximo::MySQL::Cluster::Instance $self = $_[0];
@@ -435,7 +462,7 @@ sub start_transaction {
     # as it is more than likely owned by someone who is talking to a slave or whatever
     if ( $self->backend ) {
         Proximo::debug( 'Cluster instance trying to give up backend.' );
-        $self->cluster->adopt_backend( $self->backend );
+        #$self->cluster->adopt_backend( $self->backend );
         $self->backend( undef );
     }
 

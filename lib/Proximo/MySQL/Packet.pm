@@ -177,8 +177,8 @@ sub _build {
             if    ( $type == P_BYTE    ) { $buf .= pack( 'C', $val );                  }
             elsif ( $type == P_SHORT   ) { $buf .= pack( 'v', $val );                  }
             elsif ( $type == P_LONG    ) { $buf .= pack( 'V', $val );                  }
-            elsif ( $type == P_NULLSTR ) { $buf .= $val . "\0";                        }
-            elsif ( $type == P_RAW     ) { $buf .= $val;                               }
+            elsif ( $type == P_NULLSTR ) { $buf .= ( ref $val ? $$val : $val ) . "\0"; }
+            elsif ( $type == P_RAW     ) { $buf .= ref $val ? $$val : $val;            }
             elsif ( $type == P_LCBIN   ) { $buf .= $lcbin->($val);                     }
             elsif ( $type == P_LCSTR   ) {
                 # undef is NULL which gets a special treatment
@@ -540,7 +540,6 @@ sub new {
             P_SHORT,   $self->{server_status},
             P_SHORT,   $self->{warning_count},
             P_RAW,     $self->{message},        # NOT a null terminated string!
-
         );
 
     return $self;
@@ -604,7 +603,27 @@ use fields (
         'command',
         'arg'
     );
-    
+
+sub new {
+    my Proximo::MySQL::Packet::Command $self = $_[0];
+    $self = fields::new( $self ) unless ref $self;
+
+    # new packet, no type, new sequence
+    $self->SUPER::new( $_[1], 0 );
+
+    # put in arguments
+    $self->{command} = $_[1];
+    $self->{arg}     = $_[2];
+
+    # now put together the packet itself
+    $self->_build(
+            P_BYTE,    $self->{command},
+            P_RAW,     $self->{arg},        # NOT a null terminated string!
+        );
+
+    return $self;
+}
+
 sub new_from_raw {
     my Proximo::MySQL::Packet::Command $self = $_[0];
     $self = fields::new( $self ) unless ref $self;
@@ -615,7 +634,7 @@ sub new_from_raw {
 
     # load up the data
     $self->{command} = $data[0];
-    $self->{arg} = $data[1];
+    $self->{arg}     = $data[1];
 
     return $self;
 }
@@ -627,12 +646,12 @@ sub command_type {
 
 sub argument {
     my Proximo::MySQL::Packet::Command $self = $_[0];
-    return $self->{arg};
+    return ref $self->{arg} ? $$self->{arg} : $self->{arg};
 }
 
 sub argument_ref {
     my Proximo::MySQL::Packet::Command $self = $_[0];
-    return \$self->{arg};
+    return ref $self->{arg} ? $self->{arg} : \$self->{arg};
 }
 
 #############################################################################

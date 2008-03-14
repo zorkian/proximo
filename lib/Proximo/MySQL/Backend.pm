@@ -13,6 +13,7 @@ use base 'Proximo::MySQL::Connection';
 
 use fields (
         'cluster_inst',   # our P::M::Cluster::Instance object
+        'pkt',            # temporarily held packet
     );
     
 # construction is fun for you and me
@@ -21,10 +22,7 @@ sub new {
     $self = fields::new( $self ) unless ref $self;
 
     # arguments
-    my ( $svc, $clust ) = ( $_[1], $_[2] );
-
-    # get where we're proxying to
-    my $ipport = $svc->proxy_to;
+    my ( $clust, $ipport ) = ( $_[1], $_[2] );
     my ( $ip, $port ) = ( $1, $2 )
         if $ipport =~ /^(.+?):(\d+)$/;
 
@@ -46,18 +44,16 @@ sub new {
 
     # save our cluster instance
     $self->{cluster_inst} = $clust;
+    $self->{pkt}          = undef;
 
     # initialize the work via our parent
-    $self->SUPER::new( $svc, $sock, $addr );
+    $self->SUPER::new( $self->inst->service, $sock, $addr );
 
     # now turn on watching for reads, as the first thing that happens is
     # the server will send us a packet saying "hey what's up my name's bob"
     $self->current_database( $self->inst->client->current_database );
     $self->state( 'connecting' );
     $self->watch_read( 1 );
-
-    # and now, we belong to you
-    $self->inst->client->backend( $self );
 
     return $self;
 }
@@ -97,8 +93,11 @@ sub event_packet {
             Proximo::debug( 'Backend server authentication successful.' );
             $self->state( 'idle' );
 
-            # okay, now let's inform the server
-            $self->inst->client->backend_available( $self );
+            # if we have a packet queued, let's do it
+            if ( my $pkt = $self->{pkt} ) {
+                $self->{pkt} = undef;
+                $self->send_packet( $pkt );
+            }
 
         # error packet
         } elsif ( $peek == 255 ) {
@@ -108,7 +107,6 @@ sub event_packet {
             # FIXME: is this right?  I'm too tired to really think if this is the proper thing
             # to do in this case.  test, test...
             $self->close( 'error' );
-            $self->inst->client->close( 'error' );
 
         # something else
         } else {
@@ -204,6 +202,20 @@ sub send_packet {
     $self->state( 'wait_response' );
     $self->_send_packet( $pkt );
 
+    return 1;
+}
+
+# queues up a packet to go out to this backend
+sub queue_packet {
+    my Proximo::MySQL::Backend $self = $_[0];
+    my Proximo::MySQL::Packet $pkt = $_[1];
+
+    # if we're already idle, send it out
+    return $self->send_packet( $pkt )
+        if $self->state eq 'idle';
+
+    # set to queue (of depth 1, not really a queue)
+    $self->{pkt} = $pkt;
     return 1;
 }
 
