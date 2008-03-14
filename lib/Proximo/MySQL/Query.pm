@@ -34,6 +34,8 @@ sub analyze {
 
     # we use this as a simple flag, if it's defined we've already analyzed
     return if defined $self->{is_write};
+    
+    # FIXME: we forgot about LAST_INSERT_ID here...
 
     # FIXME: this is retarded logic, we should probably make this somewhat more complicated
     # and detect more cases... oh well, I don't think it matters TOO much, as long as we get
@@ -63,3 +65,5 @@ sub is_write {
     my Proximo::MySQL::Query $self = $_[0];
     return $self->{is_write};
 }
+
+1;

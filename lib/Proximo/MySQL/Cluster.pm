@@ -270,8 +270,11 @@ sub query {
     }
 
     # so by this point we know what's going on with the query, so let's actually
-    # figure out what backend to send it to.  if we're sticky they should have a
-    # backend already...
+    # figure out what backend to send it to.  if we're sticky they might have a backend
+    # already...
+    if ( $inst->sticky ) {
+        my $be = $inst->backend;
+    }
     
 
 =pod
@@ -426,6 +429,7 @@ sub start_transaction {
     # if we're going into a transaction then go ahead and dump the current backend,
     # as it is more than likely owned by someone who is talking to a slave or whatever
     if ( $self->backend ) {
+        Proximo::debug( 'Cluster instance trying to give up backend.' );
         $self->cluster->adopt_backend( $self->backend );
         $self->backend( undef );
     }
