@@ -54,3 +54,28 @@ sorts of replacements on where to send the queries, if they wanted.
 for example, they could totally not use a mysql cluster backend and could instead
 use a postgres backend and setup a plugin or something to do the right thing with
 regards to rewriting queries and the like...
+
+===================
+
+keeping current database in sync and changing it around might be too much work to do?  might be useful to have backends be ip:port:database?
+
+can't think of any applications that change database with any regularity...
+
+need to start testing the other modes, see if we can get a 2nd or 3rd mysql up.. maybe connecting to some running in parallels that'd probably be easier
+
+we start transactions on write, that's probably wrong
+we might be able to get away with setting sticky, which expires in 5s
+and using the result of the query to look at the flag to see if we're in a trans now
+see how this affects BEGIN?
+what about AUTO_COMMIT?
+
+what about SET NAMES and stuff?
+
+honestly all of this munging is just to make connection pooling work
+but that might be a lost cause...
+or maybe, make it so that the second it does something like SET, the connection gets 'saved' to that instance, and is always used there only
+this lets things like bouncer use pooling
+but bugzilla doesn't
+this is a stopgap for now until more work is done to make it do the right stuff
+
+remember the primary use case of bugzilla in NL
