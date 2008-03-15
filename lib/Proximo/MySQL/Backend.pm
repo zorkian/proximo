@@ -14,6 +14,8 @@ use base 'Proximo::MySQL::Connection';
 use fields (
         'cluster_inst',   # our P::M::Cluster::Instance object
         'pkt',            # temporarily held packet
+        'ipport',         # initial connect argument
+        'cmd_type',       # current command type
     );
     
 # construction is fun for you and me
@@ -45,6 +47,7 @@ sub new {
     # save our cluster instance
     $self->{cluster_inst} = $clust;
     $self->{pkt}          = undef;
+    $self->{ipport}       = $ipport;
 
     # initialize the work via our parent
     $self->SUPER::new( $self->inst->service, $sock, $addr );
@@ -99,8 +102,7 @@ sub event_packet {
                 return $self->send_packet( $pkt );
             }
 
-            # FIXME: we should do something better than close here
-            
+            # FIXME: we should do something better than close here            
 
         # error packet
         } elsif ( $peek == 255 ) {
@@ -123,9 +125,9 @@ sub event_packet {
         my $val = unpack( 'C', substr( $$packet_raw, 0, 1 ) );
 
         # OK happens if we have no result set
-        my $packet;
+        my ( $packet, $go_idle );
         if ( $val == PEEK_OK ) {
-            $self->state( 'wait_client' );
+            $go_idle = 1;
             $packet = Proximo::MySQL::Packet::OK->new_from_raw( $seq, $packet_raw );
             Proximo::debug( 'Result OK: server status = %d, affected rows = %d, insert id = %d, warnings = %d, message = %s.',
                             $packet->server_status, $packet->affected_rows, $packet->insert_id, $packet->warning_count,
@@ -133,6 +135,7 @@ sub event_packet {
 
         # ERROR packets indicate ... an error
         } elsif ( $val == PEEK_ERROR ) {
+            $go_idle = 1;
             $packet = Proximo::MySQL::Packet::Error->new_from_raw( $seq, $packet_raw );
             Proximo::debug( 'Result ERROR: error number = %d, SQL state = %s, message = %s.',
                             $packet->error_number, $packet->sql_state, $packet->message );
@@ -159,6 +162,12 @@ sub event_packet {
             $self->inst->client->write( \$buf );
             $self->inst->client->watch_write( 1 );
         }
+        
+        # if to go idle...
+        if ( $go_idle ) {
+            $self->state( 'idle' );
+            $self->inst->backend_idle;            
+        }
 
     # in this state, the server is sending fields at us
     } elsif ( $self->state eq 'recv_fields' ) {
@@ -167,7 +176,15 @@ sub event_packet {
         
         # if this is an EOF packet, set our state
         if ( $val == PEEK_EOF ) {
-            $self->state( 'recv_rows' );
+            # special case type 4, which is listing fields, as there is no recv_rows set
+            if ( $self->command_type == 4 ) {
+                $self->state( 'idle' );
+                $self->inst->backend_idle;
+                
+            # guess not, so we can treat like normal
+            } else {
+                $self->state( 'recv_rows' );                
+            }
         }
 
         # FIXME: this is manual and shouldn't be done this way
@@ -180,15 +197,16 @@ sub event_packet {
         # decode peek value
         my $val = unpack( 'C', substr( $$packet_raw, 0, 1 ) );
         
-        # if this is an EOF packet, set our state
-        if ( $val == PEEK_EOF ) {
-            $self->state( 'idle' );
-        }
-        
         # FIXME: this is manual and shouldn't be done this way
         my $buf = substr( pack( 'V', length( $$packet_raw ) ), 0, 3) . chr( $seq ) . $$packet_raw;
         $self->inst->client->write( \$buf );
         $self->inst->client->watch_write( 1 );
+
+        # if this is an EOF packet, set our state
+        if ( $val == PEEK_EOF ) {
+            $self->state( 'idle' );
+            $self->inst->backend_idle;
+        }
 
     # haven't put in any handling for this state?
     } else {
@@ -202,9 +220,13 @@ sub send_packet {
     my Proximo::MySQL::Backend $self = $_[0];
     my Proximo::MySQL::Packet $pkt = $_[1];
 
+    # see if this is a packet type we can do something with
+    $self->{cmd_type} = $pkt->command_type
+        if ref $pkt eq 'Proximo::MySQL::Packet::Command';
+
+    # state management
     $self->state( 'wait_response' );
     $self->_send_packet( $pkt );
-
     return 1;
 }
 
@@ -222,11 +244,23 @@ sub queue_packet {
     return 1;
 }
 
+# returns our ipport so we know where this backend goes
+sub ipport {
+    my Proximo::MySQL::Backend $self = $_[0];
+    return $self->{ipport};
+}
+
+# type of last command sent to backend
+sub command_type {
+    my Proximo::MySQL::Backend $self = $_[0];
+    return $self->{cmd_type};
+}
+
 # if we get closed out...
 sub close {
     my Proximo::MySQL::Backend $self = $_[0];
 
-    # if our state is currently not
+    # blow up a client that is still connected
     my $cl = $self->inst->client;
     $self->inst->destroy_links;
     $self->{cluster_inst} = undef;

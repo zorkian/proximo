@@ -65,6 +65,7 @@ sub new {
     $self->{masters}  = [];
     $self->{slaves}   = [];
     $self->{readonly} = 0;
+    $self->{backends} = {};
 
     return $self;
 }
@@ -218,12 +219,36 @@ sub is_setup_readonly {
 # ahead and spawn one
 sub _get_backend {
     my Proximo::MySQL::Cluster $self = $_[0];
-    my ( $ipport, $cb ) = ( $_[1], $_[2] );
+    my ( $inst, $ipport ) = ( $_[1], $_[2] );
+    return Proximo::warn( 'Low level failure in _get_backend.' )
+        unless defined $inst && defined $ipport;
 
-    my $be = shift( @{ $self->{backends}->{$ipport} } );
-    return $cb->( $be ) if $be;
+    # try to return the first available backend, we have to be wary about
+    # them being closed here
+    while ( my $be = shift( @{ $self->{backends}->{$ipport} || [] } ) ) {
+        next unless $be->state eq 'idle';
+        Proximo::debug( 'EXISTING backend to %s.', $ipport );
+        return $be;
+    }
 
-    return Proximo::MySQL::Backend->new( )
+    # guess none available, so make a new one and return it.  note that we
+    # attempt to create the backends hash entry so later we can accept this
+    # node coming back to us.
+    Proximo::debug( 'CREATING backend to %s.', $ipport );
+    $self->{backends}->{$ipport} ||= [];
+    return Proximo::MySQL::Backend->new( $inst, $ipport );
+}
+
+# called when a backend is now available
+sub backend_available {
+    my Proximo::MySQL::Cluster $self = $_[0];
+    my Proximo::MySQL::Backend $be = $_[1];
+    
+    # push onto end of list for the ipport
+    return Proximo::warn( 'Cluster %s told about backend %s which is not ours?', $self->name, $be->ipport )
+        unless exists $self->{backends}->{ $be->ipport };
+    push @{ $self->{backends}->{ $be->ipport } ||= [] }, $be;
+    return 1;
 }
 
 # so in general, we should be able to say "give me something I can send a
@@ -231,17 +256,70 @@ sub _get_backend {
 # current setup and status
 sub get_readonly_backend {
     my Proximo::MySQL::Cluster $self = $_[0];
+    my Proximo::MySQL::Cluster::Instance $inst = $_[1];
 
-    # depending on mode we pull from a different area
-    return Proximo::MySQL::Backend->new( $_[1], '127.0.0.1:3306' );
+    # in single mode, we pull the one master ipport
+    my $ipport;
+    if ( $self->is_setup_single ) {
+        $ipport = $self->{masters}->[0];
+
+    # in random mode, we just pick a random from the master, since everything
+    # is assumed to be read/write...
+    } elsif ( $self->is_setup_random ) {
+        $ipport = $self->{masters}->[ int( rand( scalar( @{ $self->{slaves} } ) ) ) ];
+
+    # in the master-master case, we are using a single machine until something
+    # causes us to decide to failover
+    } elsif ( $self->is_setup_master_master ) {
+
+    # readonly uses random slaves, master-slave uses random slaves
+    } elsif ( $self->is_setup_readonly || $self->is_setup_master_slave ) {
+        $ipport = $self->{slaves}->[ int( rand( scalar( @{ $self->{slaves} } ) ) ) ];
+
+    # uh big problem?
+    } else {
+        Proximo::fatal( 'Big trouble in little China.  Cluster mode unknown.' );
+
+    }
+
+    # return new based on set ipport
+    return Proximo::warn( 'Unable to decide on backend.' )
+        unless defined $ipport;
+    return $self->_get_backend( $inst, $ipport );
 }
 
 # writes go here
 sub get_readwrite_backend {
     my Proximo::MySQL::Cluster $self = $_[0];
+    my Proximo::MySQL::Cluster::Instance $inst = $_[1];
 
-    # depending on mode we pull from a different area
-    return Proximo::MySQL::Backend->new( $_[1], '127.0.0.1:3306' );
+    # in single mode, we pull the one master ipport
+    my $ipport;
+    if ( $self->is_setup_single ) {
+        $ipport = $self->{masters}->[0];
+
+    # in random mode, we just pick a random from the master, since everything
+    # is assumed to be read/write... same with master slave
+    } elsif ( $self->is_setup_random || $self->is_setup_master_slave ) {
+        $ipport = $self->{masters}->[ int( rand( scalar( @{ $self->{slaves} } ) ) ) ];
+
+    # in the master-master case, we are using a single machine until something
+    # causes us to decide to failover
+    } elsif ( $self->is_setup_master_master ) {
+
+    # there are no masters for writing in readonly...
+    } elsif ( $self->is_setup_readonly ) {
+
+    # uh big problem?
+    } else {
+        Proximo::fatal( 'Big trouble in little China.  Cluster mode unknown.' );
+
+    }
+
+    # return new based on set ipport
+    return Proximo::warn( 'Unable to decide on backend.' )
+        unless defined $ipport;
+    return $self->_get_backend( $inst, $ipport );
 }
 
 # takes in a query and does something with it, notably executing it ideally
@@ -281,11 +359,23 @@ sub query {
     # helper sub, this does the right thing for sending a query to a particular
     # backend, regardless of what it us
     my $query_to = sub {
-        $inst->backend( $_[0] );
+        my Proximo::MySQL::Backend $be = $_[0];
 
-        $inst->backend->queue_packet(
-                Proximo::MySQL::Packet::Command->new( $q_type, $q_ref )
-            );
+        # note that the backend could be undefined
+        if ( defined $be ) {
+            $inst->backend( $_[0] );
+            $inst->backend->queue_packet(
+                    Proximo::MySQL::Packet::Command->new( $q_type, $q_ref )
+                );
+                
+        # and if it is, we send an error
+        } else {
+            $inst->client->_send_packet(
+                    Proximo::MySQL::Packet::Error->new(
+                            $self, $inst->client->next_sequence, 9999, 'Unable to find an appropriate backend for query.'
+                        ),
+                );
+        }
     };
 
     # so by this point we know what's going on with the query, so let's actually
@@ -511,6 +601,20 @@ sub destroy_links {
     $self->{cluster} = undef;
     $self->{client}  = undef;
     $self->{backend} = undef;
+    return 1;
+}
+
+# when a backend finishes with stuff they call this
+sub backend_idle {
+    my Proximo::MySQL::Cluster::Instance $self = $_[0];
+    
+    # if sticky, bail
+    return 1 if $self->sticky;
+    
+    # okay, let's free it up to the bool
+    my $be = $self->backend;
+    $self->{backend} = undef;
+    $self->cluster->backend_available( $be );
     return 1;
 }
 

@@ -159,9 +159,19 @@ sub as_string {
 sub current_database {
     my Proximo::MySQL::Connection $self = $_[0];
     if ( scalar( @_ ) == 2 ) {
+        Proximo::debug( '%s current database now %s.', ref $self, $_[1] );
         return $self->{dbname} = $_[1];
     }
     return $self->{dbname};
+}
+
+# set state on close
+sub close {
+    my Proximo::MySQL::Connection $self = $_[0];
+
+    # state management
+    $self->state( 'closed' );
+    return $self->SUPER::close( $_[1] );
 }
 
 # these handlers are called in various states, we need to smack around anybody

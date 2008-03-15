@@ -10,6 +10,7 @@ use base 'Proximo::MySQL::Connection';
 
 use fields (
         'cluster_inst',   # P::M::Cluster::Instance object
+        'sequence',       # internal sequence counter
     );
 
 # construct a new server connection, this is the connection between us
@@ -60,12 +61,21 @@ sub event_write {
     }
 }
 
+# get next sequence counter
+sub next_sequence {
+    my Proximo::MySQL::Client $self = $_[0];
+    return ++$self->{sequence};
+}
+
 # called when we get a packet from the client
 sub event_packet {
-    my Proximo::MySQL::Client $self = shift;
+    my Proximo::MySQL::Client $self = $_[0];
 
-    my ( $seq, $packet_raw ) = @_;
+    my ( $seq, $packet_raw ) = ( $_[1], $_[2] );
     Proximo::debug( 'Server processing packet with sequence %d of length %d bytes.', $seq, length( $$packet_raw ) );
+    
+    # save sequence
+    $self->{sequence} = $seq;
 
     # if we're waiting on the handshake response, let's get that
     if ( $self->state eq 'handshake' ) {
@@ -106,7 +116,16 @@ sub event_packet {
             return;
         }
 
+        # change our active database if it's type 2
+        # FIXME: this could be a problem if they USE an invalid database and it errors,
+        # we should detect that situation
+        $self->current_database( $packet->argument )
+            if $packet->command_type == 2;
+
         # pass the packet to the cluster instance for handling
+        # FIXME: set our state to something more appropriate like wait_backend, that way we
+        # can die out if the user sends us packets when we don't expect them (oh, I have this
+        # same note up above... lol)
         return $self->inst->query( $packet->command_type, $packet->argument_ref );
 
         #$self->_send_packet(
