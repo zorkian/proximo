@@ -96,8 +96,11 @@ sub event_packet {
             # if we have a packet queued, let's do it
             if ( my $pkt = $self->{pkt} ) {
                 $self->{pkt} = undef;
-                $self->send_packet( $pkt );
+                return $self->send_packet( $pkt );
             }
+
+            # FIXME: we should do something better than close here
+            
 
         # error packet
         } elsif ( $peek == 255 ) {
@@ -118,7 +121,7 @@ sub event_packet {
     } elsif ( $self->state eq 'wait_response' ) {
         # four possible responses in this case, let's see what we got
         my $val = unpack( 'C', substr( $$packet_raw, 0, 1 ) );
-        
+
         # OK happens if we have no result set
         my $packet;
         if ( $val == PEEK_OK ) {
