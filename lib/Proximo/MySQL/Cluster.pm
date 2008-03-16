@@ -243,10 +243,11 @@ sub _get_backend {
 sub backend_available {
     my Proximo::MySQL::Cluster $self = $_[0];
     my Proximo::MySQL::Backend $be = $_[1];
-    
+
     # push onto end of list for the ipport
     return Proximo::warn( 'Cluster %s told about backend %s which is not ours?', $self->name, $be->ipport )
         unless exists $self->{backends}->{ $be->ipport };
+    Proximo::debug( 'Cluster %s accepting idle backend %s to pool.', $self->name, $be->ipport );
     push @{ $self->{backends}->{ $be->ipport } ||= [] }, $be;
     return 1;
 }
@@ -347,13 +348,15 @@ sub query {
         }
     }
 
-    # at this point, if the user is NOT in a transaction, see if we should start
-    # one up, based on the query contents
-    unless ( $inst->in_transaction ) {
+    # at this point, if the user is NOT in sticky mode, we analyze the query and see
+    # if we should go into sticky (readwrite) mode
+    unless ( $inst->sticky ) {
         # analyze the query
-        my $q = Proximo::MySQL::Query->new( $q_ref );
-        $inst->start_transaction
-            if $q->is_write;
+        my $q = Proximo::MySQL::Query->new( $q_type, $q_ref );
+        if ( $q->is_write ) {
+            $inst->sticky( 1 );
+            $inst->note_write_query;
+        }
     }
 
     # helper sub, this does the right thing for sending a query to a particular
@@ -493,6 +496,7 @@ sub cluster {
 sub backend {
     my Proximo::MySQL::Cluster::Instance $self = $_[0];
     if ( scalar( @_ ) == 2 ) {
+        $_[1]->inst( $self );
         return $self->{backend} = $_[1];
     }
     return $self->{backend};
@@ -587,12 +591,6 @@ sub query {
     return $self->cluster->query( $self, $_[1], $_[2] );
 }
 
-# called by the backend when they're ready for traffic
-sub backend_ready {
-    my Proximo::MySQL::Cluster::Instance $self = $_[0];
-    
-}
-
 # close up connections
 sub destroy_links {
     my Proximo::MySQL::Cluster::Instance $self = $_[0];
@@ -613,8 +611,11 @@ sub backend_idle {
     
     # okay, let's free it up to the bool
     my $be = $self->backend;
-    $self->{backend} = undef;
-    $self->cluster->backend_available( $be );
+    if ( defined $be ) {
+        $be->inst( undef );
+        $self->{backend} = undef;
+        $self->cluster->backend_available( $be );
+    }
     return 1;
 }
 

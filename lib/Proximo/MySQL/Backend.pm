@@ -64,6 +64,25 @@ sub new {
 # return our cluster instance
 sub inst {
     my Proximo::MySQL::Backend $self = $_[0];
+
+    # if they're changing the instance we're on...
+    if ( scalar( @_ ) == 2 ) {
+        my $inst = $self->{cluster_inst} = $_[1];
+        Proximo::debug( 'Setting backend instance to %s.', $inst || '(undef)' );
+
+        # ...then we might need to change databases!
+        if ( defined $inst ) {
+            Proximo::debug( 'Backend getting cluster instance: client db=%s, my db=%s.',
+                            $inst->client->current_database, $self->current_database );
+            $self->switch_database( $inst->client->current_database )
+                if $inst->client->current_database ne $self->current_database;
+        }
+
+        # either way, return it
+        return $inst;
+    }
+
+    # simple return
     return $self->{cluster_inst};
 }
 
@@ -118,6 +137,31 @@ sub event_packet {
             Proximo::fatal( 'Really bad peek value %d.', $peek );
             
         }
+    
+    # used when we're internally changing the database
+    } elsif ( $self->state eq 'switching_database' ) {
+        # four possible responses in this case, let's see what we got
+        my $val = unpack( 'C', substr( $$packet_raw, 0, 1 ) );
+
+        # okay is cool
+        if ( $val == PEEK_OK ) {
+            return $self->send_packet( $self->{pkt} )
+                if $self->{pkt};
+            return $self->idle;
+            
+        # anything else, we just close.  we aren't sure what can be done at this point,
+        # if we are unable to switch database, something is gloriously fubar.
+        } else {
+            if ( $val == PEEK_ERROR ) {
+                my $packet = Proximo::MySQL::Packet::Error->new_from_raw( $seq, $packet_raw );
+                Proximo::debug( 'Result ERROR: error number = %d, SQL state = %s, message = %s.',
+                                $packet->error_number, $packet->sql_state, $packet->message );
+            }
+
+            Proximo::warn( 'Unable to change database for backend!' );
+            return $self->close( 'switch_db_fail' );
+            
+        }
 
     # when we get a response in this state, we can send it to the client
     } elsif ( $self->state eq 'wait_response' ) {
@@ -164,33 +208,30 @@ sub event_packet {
         }
         
         # if to go idle...
-        if ( $go_idle ) {
-            $self->state( 'idle' );
-            $self->inst->backend_idle;            
-        }
+        $self->idle
+            if $go_idle;
 
     # in this state, the server is sending fields at us
     } elsif ( $self->state eq 'recv_fields' ) {
         # decode peek value
         my $val = unpack( 'C', substr( $$packet_raw, 0, 1 ) );
         
+        # FIXME: this is manual and shouldn't be done this way
+        my $buf = substr( pack( 'V', length( $$packet_raw ) ), 0, 3) . chr( $seq ) . $$packet_raw;
+        $self->inst->client->write( \$buf );
+        $self->inst->client->watch_write( 1 );
+
         # if this is an EOF packet, set our state
         if ( $val == PEEK_EOF ) {
             # special case type 4, which is listing fields, as there is no recv_rows set
             if ( $self->command_type == 4 ) {
-                $self->state( 'idle' );
-                $self->inst->backend_idle;
+                $self->idle;
                 
             # guess not, so we can treat like normal
             } else {
                 $self->state( 'recv_rows' );                
             }
         }
-
-        # FIXME: this is manual and shouldn't be done this way
-        my $buf = substr( pack( 'V', length( $$packet_raw ) ), 0, 3) . chr( $seq ) . $$packet_raw;
-        $self->inst->client->write( \$buf );
-        $self->inst->client->watch_write( 1 );
 
     # server is blasting actual row data at us
     } elsif ( $self->state eq 'recv_rows' ) {
@@ -203,16 +244,39 @@ sub event_packet {
         $self->inst->client->watch_write( 1 );
 
         # if this is an EOF packet, set our state
-        if ( $val == PEEK_EOF ) {
-            $self->state( 'idle' );
-            $self->inst->backend_idle;
-        }
+        $self->idle
+            if $val == PEEK_EOF;
 
     # haven't put in any handling for this state?
     } else {
         Proximo::fatal( 'Backend received packet in unexpected state %s.', $self->state );
         
     }
+}
+
+# invoke a manual database switch
+sub switch_database {
+    my Proximo::MySQL::Backend $self = $_[0];
+
+    # set state, send packet
+    Proximo::debug( 'Switching database on backend to %s.', $_[1] );
+    $self->state( 'switching_database' );
+    $self->current_database( $_[1] );
+    $self->_send_packet(
+            Proximo::MySQL::Packet::Command->new( 2, $_[1] )
+        );
+    return 1;
+}
+
+# call when we are idle
+sub idle {
+    my Proximo::MySQL::Backend $self = $_[0];
+
+    # set state, remove cluster, go idle
+    Proximo::debug( 'Backend going idle.' );
+    $self->state( 'idle' );
+    $self->inst->backend_idle;
+    return 1;
 }
 
 # send a packet from the client to the backend

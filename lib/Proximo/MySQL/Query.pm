@@ -9,6 +9,7 @@ package Proximo::MySQL::Query;
 use strict;
 
 use fields (
+        'raw_qtype',   # query type
         'raw_qref',    # scalar ref of query
         'is_write',    # is a write query
     );
@@ -19,8 +20,9 @@ sub new {
     $self = fields::new( $self ) unless ref $self;
 
     # set innards
-    $self->{raw_qref} = $_[1];
-    $self->{is_write} = undef;
+    $self->{raw_qtype} = $_[1];
+    $self->{raw_qref}  = $_[2];
+    $self->{is_write}  = undef;
 
     # and analyze!
     $self->analyze;
@@ -34,6 +36,13 @@ sub analyze {
 
     # we use this as a simple flag, if it's defined we've already analyzed
     return if defined $self->{is_write};
+
+    # if this is type 4 (show fields) then bail early
+    if ( $self->{raw_qtype} == 4 ) {
+        Proximo::debug( 'List fields query, considering a read.' );
+        $self->{is_write} = 0;
+        return 1;
+    }
     
     # FIXME: we forgot about LAST_INSERT_ID here...
 

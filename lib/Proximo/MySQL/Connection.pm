@@ -149,9 +149,9 @@ sub as_string {
     my Proximo::MySQL::Connection $self = $_[0];
 
     return sprintf(
-            '%s: connected to %s:%d for %d seconds; state=%s, service=%s.',
+            '%s: connected to %s:%d for %d seconds; state=%s, service=%s, db=%s.',
             ref( $self ), $self->remote_ip, $self->remote_port, time - $self->time_established,
-            $self->state, $self->service->name,
+            $self->state, $self->service->name, $self->current_database,
         ); 
 }
 
@@ -159,7 +159,7 @@ sub as_string {
 sub current_database {
     my Proximo::MySQL::Connection $self = $_[0];
     if ( scalar( @_ ) == 2 ) {
-        Proximo::debug( '%s current database now %s.', ref $self, $_[1] );
+        Proximo::debug( '%s current database now %s.', $self, $_[1] );
         return $self->{dbname} = $_[1];
     }
     return $self->{dbname};

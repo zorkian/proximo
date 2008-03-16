@@ -458,7 +458,7 @@ sub new {
             P_BYTE,    0xff,
             P_SHORT,   $self->{errno},
             P_RAW,     '#',
-            P_RAW,     'OWNED',
+            P_RAW,     'ERROR',
             P_RAW,     $self->{message},  # NOT a null terminated string!
         );
 
