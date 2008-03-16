@@ -187,7 +187,17 @@ sub event_packet {
             # when a transaction has begun!
             if ( $packet->in_transaction ) {
                 Proximo::debug( 'Detected transaction, setting appropriate flags.' );
-                $self->inst->begin_transaction;
+                $self->inst->start_transaction;
+
+            # well, if this is not on, then we could have potentially ended a transaction
+            # with this very command
+            } else {
+                # so see if we were in one, then end it
+                if ( $self->inst->in_transaction ) {
+                    Proximo::debug( 'Detected end of transaction.' );
+                    $self->inst->end_transaction;
+                }
+
             }
             
             # either way, we go idle
