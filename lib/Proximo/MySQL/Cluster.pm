@@ -391,6 +391,17 @@ sub query {
 
     # if sticky is not on, then let's go ahead and just get them a readable backend
     } else {
+        # if they had a backend, free it up.  we do not want to reuse this backend
+        # below because if we were sticky (and therefore have a backend) then it is
+        # a readwrite backend.  it MAY be the same as a readonly backend, but instead
+        # of doing logic here to determine that, we just free it up and get a new one.
+        if ( my $be = $inst->backend ) {
+            Proximo::debug( 'Freeing up sticky backend.' );
+            $self->backend_available( $be );
+            $inst->backend( undef );
+        }
+
+        # now do the logic of 
         $query_to->( $self->get_readonly_backend( $inst ) );
 
     }
@@ -496,7 +507,8 @@ sub cluster {
 sub backend {
     my Proximo::MySQL::Cluster::Instance $self = $_[0];
     if ( scalar( @_ ) == 2 ) {
-        $_[1]->inst( $self );
+        $_[1]->inst( $self )
+            if defined $_[1];
         return $self->{backend} = $_[1];
     }
     return $self->{backend};

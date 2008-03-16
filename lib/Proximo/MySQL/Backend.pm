@@ -16,6 +16,7 @@ use fields (
         'pkt',            # temporarily held packet
         'ipport',         # initial connect argument
         'cmd_type',       # current command type
+        'last_cmd',       # time of last command/packet out
     );
     
 # construction is fun for you and me
@@ -44,13 +45,15 @@ sub new {
     IO::Handle::blocking( $sock, 0 );
     connect $sock, $addr;
 
+    # initialize the work via our parent
+    $self->SUPER::new( $clust->service, $sock, $addr );
+
     # save our cluster instance
     $self->{cluster_inst} = $clust;
     $self->{pkt}          = undef;
     $self->{ipport}       = $ipport;
-
-    # initialize the work via our parent
-    $self->SUPER::new( $self->inst->service, $sock, $addr );
+    $self->{cmd_type}     = undef;
+    $self->{last_cmd}     = undef;
 
     # now turn on watching for reads, as the first thing that happens is
     # the server will send us a packet saying "hey what's up my name's bob"
@@ -289,6 +292,7 @@ sub send_packet {
         if ref $pkt eq 'Proximo::MySQL::Packet::Command';
 
     # state management
+    $self->{last_cmd} = time;
     $self->state( 'wait_response' );
     $self->_send_packet( $pkt );
     return 1;
@@ -334,6 +338,23 @@ sub close {
         if $cl;
 
     $self->SUPER::close( $_[1] );
+}
+
+# how long we've been idle
+sub idle_time {
+    my Proximo::MySQL::Backend $self = $_[0];
+    return defined $self->{last_cmd} ? ( time - $self->{last_cmd} ) : 'none';
+}
+
+# render ourselves out for the management console
+sub as_string {
+    my Proximo::MySQL::Backend $self = $_[0];
+
+    return sprintf(
+            '%s: connected to %s:%d for %d seconds; state=%s, service=%s, db=%s, idle_time=%s.',
+            ref( $self ), $self->remote_ip, $self->remote_port, time - $self->time_established,
+            $self->state, $self->service->name, $self->current_database, $self->idle_time,
+        ); 
 }
 
 1;
