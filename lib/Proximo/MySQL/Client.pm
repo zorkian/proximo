@@ -183,7 +183,7 @@ sub close {
         if $be;
 
     # proxy up to the superclass
-    return $self->SUPER::close( @_ );
+    return $self->SUPER::close( $_[1] );
 }
 
 1;

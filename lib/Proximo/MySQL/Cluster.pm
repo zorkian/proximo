@@ -219,14 +219,21 @@ sub is_setup_readonly {
 # ahead and spawn one
 sub _get_backend {
     my Proximo::MySQL::Cluster $self = $_[0];
-    my ( $inst, $ipport ) = ( $_[1], $_[2] );
+    my ( $inst, $ipport, $allow_writes ) = ( $_[1], $_[2], $_[3] );
     return Proximo::warn( 'Low level failure in _get_backend.' )
         unless defined $inst && defined $ipport;
 
     # try to return the first available backend, we have to be wary about
     # them being closed here
     while ( my $be = shift( @{ $self->{backends}->{$ipport} || [] } ) ) {
-        next unless $be->state eq 'idle';
+        # do a little sanity check
+        unless ( $be->state eq 'idle' &&
+                 $be->allow_writes == $allow_writes ) {
+            # ouch, guess something is bogus, kill this one
+            $be->close( 'insane' );
+            next;
+        }
+
         Proximo::debug( 'EXISTING backend to %s.', $ipport );
         return $be;
     }
@@ -236,7 +243,7 @@ sub _get_backend {
     # node coming back to us.
     Proximo::debug( 'CREATING backend to %s.', $ipport );
     $self->{backends}->{$ipport} ||= [];
-    return Proximo::MySQL::Backend->new( $inst, $ipport );
+    return Proximo::MySQL::Backend->new( $inst, $ipport, $allow_writes );
 }
 
 # called when a backend is now available
@@ -286,7 +293,7 @@ sub get_readonly_backend {
     # return new based on set ipport
     return Proximo::warn( 'Unable to decide on backend.' )
         unless defined $ipport;
-    return $self->_get_backend( $inst, $ipport );
+    return $self->_get_backend( $inst, $ipport, 0 );
 }
 
 # writes go here
@@ -320,7 +327,7 @@ sub get_readwrite_backend {
     # return new based on set ipport
     return Proximo::warn( 'Unable to decide on backend.' )
         unless defined $ipport;
-    return $self->_get_backend( $inst, $ipport );
+    return $self->_get_backend( $inst, $ipport, 1 );
 }
 
 # takes in a query and does something with it, notably executing it ideally
@@ -397,8 +404,9 @@ sub query {
         # of doing logic here to determine that, we just free it up and get a new one.
         if ( my $be = $inst->backend ) {
             Proximo::debug( 'Freeing up sticky backend.' );
-            $self->backend_available( $be );
+            $be->inst( undef );
             $inst->backend( undef );
+            $self->backend_available( $be );
         }
 
         # now do the logic of 
@@ -563,14 +571,6 @@ sub sticky {
 sub start_transaction {
     my Proximo::MySQL::Cluster::Instance $self = $_[0];
     return if $self->{in_trans};
-    
-    # if we're going into a transaction then go ahead and dump the current backend,
-    # as it is more than likely owned by someone who is talking to a slave or whatever
-    if ( $self->backend ) {
-        Proximo::debug( 'Cluster instance trying to give up backend.' );
-        #$self->cluster->adopt_backend( $self->backend );
-        $self->backend( undef );
-    }
 
     # set internal flags and return
     $self->{in_trans} = 1;
@@ -621,7 +621,7 @@ sub backend_idle {
     # if sticky, bail
     return 1 if $self->sticky;
     
-    # okay, let's free it up to the bool
+    # okay, let's free it up to the pool
     my $be = $self->backend;
     if ( defined $be ) {
         $be->inst( undef );

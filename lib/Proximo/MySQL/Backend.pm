@@ -17,6 +17,8 @@ use fields (
         'ipport',         # initial connect argument
         'cmd_type',       # current command type
         'last_cmd',       # time of last command/packet out
+        'writable',       # 1/0; our writability (just for sanity)
+        'cmd_count',      # count of commands we've sent
     );
     
 # construction is fun for you and me
@@ -25,7 +27,7 @@ sub new {
     $self = fields::new( $self ) unless ref $self;
 
     # arguments
-    my ( $clust, $ipport ) = ( $_[1], $_[2] );
+    my ( $clust, $ipport, $writable ) = ( $_[1], $_[2], $_[3] );
     my ( $ip, $port ) = ( $1, $2 )
         if $ipport =~ /^(.+?):(\d+)$/;
 
@@ -54,6 +56,8 @@ sub new {
     $self->{ipport}       = $ipport;
     $self->{cmd_type}     = undef;
     $self->{last_cmd}     = undef;
+    $self->{writable}     = $writable ? 1 : 0;
+    $self->{cmd_count}    = 0;
 
     # now turn on watching for reads, as the first thing that happens is
     # the server will send us a packet saying "hey what's up my name's bob"
@@ -71,7 +75,7 @@ sub inst {
     # if they're changing the instance we're on...
     if ( scalar( @_ ) == 2 ) {
         my $inst = $self->{cluster_inst} = $_[1];
-        Proximo::debug( 'Setting backend instance to %s.', $inst || '(undef)' );
+        Proximo::debug( '%s has new instance %s.', $self, $inst || '(undef)' );
 
         # ...then we might need to change databases!
         if ( defined $inst ) {
@@ -174,11 +178,20 @@ sub event_packet {
         # OK happens if we have no result set
         my ( $packet, $go_idle );
         if ( $val == PEEK_OK ) {
-            $go_idle = 1;
             $packet = Proximo::MySQL::Packet::OK->new_from_raw( $seq, $packet_raw );
             Proximo::debug( 'Result OK: server status = %d, affected rows = %d, insert id = %d, warnings = %d, message = %s.',
                             $packet->server_status, $packet->affected_rows, $packet->insert_id, $packet->warning_count,
                             $packet->message || '(none)' );
+
+            # do transaction handling here.  thankfully, MySQL is pretty cool and tells us
+            # when a transaction has begun!
+            if ( $packet->in_transaction ) {
+                Proximo::debug( 'Detected transaction, setting appropriate flags.' );
+                $self->inst->begin_transaction;
+            }
+            
+            # either way, we go idle
+            $go_idle = 1;
 
         # ERROR packets indicate ... an error
         } elsif ( $val == PEEK_ERROR ) {
@@ -276,7 +289,7 @@ sub idle {
     my Proximo::MySQL::Backend $self = $_[0];
 
     # set state, remove cluster, go idle
-    Proximo::debug( 'Backend going idle.' );
+    Proximo::debug( '%s going idle.', $self );
     $self->state( 'idle' );
     $self->inst->backend_idle;
     return 1;
@@ -287,12 +300,15 @@ sub send_packet {
     my Proximo::MySQL::Backend $self = $_[0];
     my Proximo::MySQL::Packet $pkt = $_[1];
 
-    # see if this is a packet type we can do something with
-    $self->{cmd_type} = $pkt->command_type
-        if ref $pkt eq 'Proximo::MySQL::Packet::Command';
+    # if it's a command packet, we keep track of some data about it which
+    # influences how we behave in the future
+    if ( ref( $pkt ) eq 'Proximo::MySQL::Packet::Command' ) {     
+        $self->{last_cmd} = time;
+        $self->{cmd_type} = $pkt->command_type;
+        $self->{cmd_count}++;
+    }
 
     # state management
-    $self->{last_cmd} = time;
     $self->state( 'wait_response' );
     $self->_send_packet( $pkt );
     return 1;
@@ -329,13 +345,16 @@ sub close {
     my Proximo::MySQL::Backend $self = $_[0];
 
     # blow up a client that is still connected
-    my $cl = $self->inst->client;
-    $self->inst->destroy_links;
-    $self->{cluster_inst} = undef;
+    if ( $self->inst ) {
+        # pew pew
+        my $cl = $self->inst->client;
+        $self->inst->destroy_links;
+        $self->inst( undef );
 
-    # proxy this to client
-    $cl->close( $_[1] )
-        if $cl;
+        # proxy this to client
+        $cl->close( $_[1] )
+            if $cl;
+    }
 
     $self->SUPER::close( $_[1] );
 }
@@ -346,15 +365,30 @@ sub idle_time {
     return defined $self->{last_cmd} ? ( time - $self->{last_cmd} ) : 'none';
 }
 
+# how many commands we've run
+sub command_count {
+    my Proximo::MySQL::Backend $self = $_[0];
+    return $self->{cmd_count};
+}
+
 # render ourselves out for the management console
 sub as_string {
     my Proximo::MySQL::Backend $self = $_[0];
 
     return sprintf(
-            '%s: connected to %s:%d for %d seconds; state=%s, service=%s, db=%s, idle_time=%s.',
+            '%s: connected to %s:%d for %d seconds; state=%s, service=%s, db=%s, idle_time=%s, %s, cmds=%d.',
             ref( $self ), $self->remote_ip, $self->remote_port, time - $self->time_established,
             $self->state, $self->service->name, $self->current_database, $self->idle_time,
+            $self->allow_writes ? 'rw' : 'ro', $self->command_count,
         ); 
+}
+
+# return writability state (called allow_writes because I'm not sure
+# how to spell writability? writeability? and I don't want to codify something
+# that I will never remember how to spell... heh)
+sub allow_writes {
+    my Proximo::MySQL::Backend $self = $_[0];
+    return $self->{writable};
 }
 
 1;

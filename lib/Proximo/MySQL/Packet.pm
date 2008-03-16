@@ -588,6 +588,12 @@ sub server_status {
     return $self->{server_status};
 }
 
+# based on server status field, some accessors
+sub in_transaction {
+    my Proximo::MySQL::Packet::OK $self = $_[0];
+    return ( $self->{server_status} || 0 ) & 1 ? 1 : 0;
+}
+
 #############################################################################
 #############################################################################
 #############################################################################

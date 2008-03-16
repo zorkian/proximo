@@ -170,6 +170,7 @@ sub close {
     my Proximo::MySQL::Connection $self = $_[0];
 
     # state management
+    Proximo::debug( '%s is now closed: %s.', $self, $_[1] );
     $self->state( 'closed' );
     return $self->SUPER::close( $_[1] );
 }
