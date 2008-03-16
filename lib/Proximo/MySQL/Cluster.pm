@@ -274,7 +274,7 @@ sub get_readonly_backend {
     # in random mode, we just pick a random from the master, since everything
     # is assumed to be read/write...
     } elsif ( $self->is_setup_random ) {
-        $ipport = $self->{masters}->[ int( rand( scalar( @{ $self->{slaves} } ) ) ) ];
+        $ipport = $self->{masters}->[ int( rand( scalar( @{ $self->{masters} } ) ) ) ];
 
     # in the master-master case, we are using a single machine until something
     # causes us to decide to failover
@@ -309,7 +309,7 @@ sub get_readwrite_backend {
     # in random mode, we just pick a random from the master, since everything
     # is assumed to be read/write... same with master slave
     } elsif ( $self->is_setup_random || $self->is_setup_master_slave ) {
-        $ipport = $self->{masters}->[ int( rand( scalar( @{ $self->{slaves} } ) ) ) ];
+        $ipport = $self->{masters}->[ int( rand( scalar( @{ $self->{masters} } ) ) ) ];
 
     # in the master-master case, we are using a single machine until something
     # causes us to decide to failover
