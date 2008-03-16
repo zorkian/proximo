@@ -373,6 +373,8 @@ sub query {
 
         # note that the backend could be undefined
         if ( defined $be ) {
+            # but if it's not, queue up a packet to send;  we have to queue because the
+            # backend might not be ready to accept it.
             $inst->backend( $_[0] );
             $inst->backend->queue_packet(
                     Proximo::MySQL::Packet::Command->new( $q_type, $q_ref )
@@ -413,46 +415,6 @@ sub query {
         $query_to->( $self->get_readonly_backend( $inst ) );
 
     }
-    
-
-=pod
-
-okay, let's see how this works out... we have a command type and a query reference
-at this point, plus we know what the state of the instance is
-
-if we are sticky right now:
-    only choices are to use existing backend or go unsticky
-if we are not sticky:
-    choices are to either get random backend or go sticky
-after the result comes back:
-    determinator for going unsticky, might be useful
-
-so we need determinators for 'should go sticky' or 'should go unsticky' which is
-going to depend on the exact state and query being run
-
-are we going to do this logic here?  seems to make more sense to have this logic
-separated out into cluster logic classes... or maybe plugins?  maybe that makes
-the most sense...
-
-
-cut
-
-    # one of two things happens, either we are in a mode that requires us to be
-    # sticky on the backend, or we can get whatever is available
-    if ( $instance->sticky ) {
-        my $be = $instance->backend;
-
-        # should never happen, if so this is a bad error case
-        unless ( $be ) {
-            Proximo::warn( 'Client with sticky flag has no backend.  Bailing!' );
-            $self->close( 'sticky_no_backend' );
-            return undef;
-        }
-
-        # see if we should stop being sticky
-        $be->do_command( $q_type, $q_ref );
-    }
-=cut
 }
 
 #############################################################################
