@@ -583,7 +583,9 @@ sub start_transaction {
 # write happened now, we treat the entire transaction as a write.
 sub end_transaction {
     my Proximo::MySQL::Cluster::Instance $self = $_[0];
-    
+
+    # close transaction, but maintain sticky
+    $self->{sticky}   = 1;
     $self->{in_trans} = 0;
     $self->{last_wrt} = time;
     return 1;
