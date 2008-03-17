@@ -368,7 +368,10 @@ sub query {
 
     # it might be a state command?  if so, then we need to enable pinning
     } elsif ( $q->is_state_command ) {
-        $do_pin = 1;
+        # FIXME: we can handle state commands right here, since they get sent to all
+        # backends that we have that are pinned, and if we have no pinned backends, then
+        # we clear out any we do have and prepare to pin the next one that comes in
+        Proximo::fatal( 'Teach me to handle state commands.' );
 
     }
 
