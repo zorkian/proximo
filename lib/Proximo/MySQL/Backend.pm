@@ -13,12 +13,13 @@ use base 'Proximo::MySQL::Connection';
 
 use fields (
         'cluster_inst',   # our P::M::Cluster::Instance object
-        'pkt',            # temporarily held packet
+        'pkt',            # arrayref of packets queued
         'ipport',         # initial connect argument
         'cmd_type',       # current command type
         'last_cmd',       # time of last command/packet out
         'writable',       # 1/0; our writability (just for sanity)
         'cmd_count',      # count of commands we've sent
+        'state_cmds',     # hash of executed state commands
     );
     
 # construction is fun for you and me
@@ -52,12 +53,13 @@ sub new {
 
     # save our cluster instance
     $self->{cluster_inst} = $clust;
-    $self->{pkt}          = undef;
+    $self->{pkt}          = [];
     $self->{ipport}       = $ipport;
     $self->{cmd_type}     = undef;
     $self->{last_cmd}     = undef;
     $self->{writable}     = $writable ? 1 : 0;
     $self->{cmd_count}    = 0;
+    $self->{state_cmds}   = undef;
 
     # now turn on watching for reads, as the first thing that happens is
     # the server will send us a packet saying "hey what's up my name's bob"
@@ -120,15 +122,9 @@ sub event_packet {
             # we've authenticated, yay
             my $packet = Proximo::MySQL::Packet::OK->new_from_raw( $seq, $packet_raw );
             Proximo::debug( 'Backend server authentication successful.' );
-            $self->state( 'idle' );
-
-            # if we have a packet queued, let's do it
-            if ( my $pkt = $self->{pkt} ) {
-                $self->{pkt} = undef;
-                return $self->send_packet( $pkt );
-            }
-
-            # FIXME: we should do something better than close here            
+            
+            # we just go idle here, this handles stuff
+            return $self->idle;
 
         # error packet
         } elsif ( $peek == 255 ) {
@@ -146,14 +142,12 @@ sub event_packet {
         }
     
     # used when we're internally changing the database
-    } elsif ( $self->state eq 'switching_database' ) {
+    } elsif ( $self->state eq 'run_state_command' ) {
         # four possible responses in this case, let's see what we got
         my $val = unpack( 'C', substr( $$packet_raw, 0, 1 ) );
 
         # okay is cool
         if ( $val == PEEK_OK ) {
-            return $self->send_packet( $self->{pkt} )
-                if $self->{pkt};
             return $self->idle;
             
         # anything else, we just close.  we aren't sure what can be done at this point,
@@ -165,10 +159,33 @@ sub event_packet {
                                 $packet->error_number, $packet->sql_state, $packet->message );
             }
 
-            Proximo::warn( 'Unable to change database for backend!' );
-            return $self->close( 'switch_db_fail' );
-            
+            Proximo::warn( 'Unable to run state command!' );
+            return $self->close( 'run_state_command_fail' );
+
         }
+
+        # used when we're internally changing the database
+        } elsif ( $self->state eq 'switching_database' ) {
+            # four possible responses in this case, let's see what we got
+            my $val = unpack( 'C', substr( $$packet_raw, 0, 1 ) );
+
+            # okay is cool
+            if ( $val == PEEK_OK ) {
+                return $self->idle;
+
+            # anything else, we just close.  we aren't sure what can be done at this point,
+            # if we are unable to switch database, something is gloriously fubar.
+            } else {
+                if ( $val == PEEK_ERROR ) {
+                    my $packet = Proximo::MySQL::Packet::Error->new_from_raw( $seq, $packet_raw );
+                    Proximo::debug( 'Result ERROR: error number = %d, SQL state = %s, message = %s.',
+                                    $packet->error_number, $packet->sql_state, $packet->message );
+                }
+
+                Proximo::warn( 'Unable to change database for backend!' );
+                return $self->close( 'switch_db_fail' );
+
+            }
 
     # when we get a response in this state, we can send it to the client
     } elsif ( $self->state eq 'wait_response' ) {
@@ -298,10 +315,17 @@ sub switch_database {
 sub idle {
     my Proximo::MySQL::Backend $self = $_[0];
 
-    # set state, remove cluster, go idle
+    # set state
     Proximo::debug( '%s going idle.', $self );
     $self->state( 'idle' );
-    $self->inst->backend_idle;
+    
+    # try to dequeue a packet, which will send stuff out
+    $self->_dequeue_packet;
+    
+    # and now let the backend know we're idle, IF we actually still are!
+    # the above dequeue might have changed state
+    $self->inst->backend_idle
+        if $self->state eq 'idle';
     return 1;
 }
 
@@ -310,31 +334,46 @@ sub send_packet {
     my Proximo::MySQL::Backend $self = $_[0];
     my Proximo::MySQL::Packet $pkt = $_[1];
 
-    # if it's a command packet, we keep track of some data about it which
-    # influences how we behave in the future
-    if ( ref( $pkt ) eq 'Proximo::MySQL::Packet::Command' ) {     
-        $self->{last_cmd} = time;
-        $self->{cmd_type} = $pkt->command_type;
-        $self->{cmd_count}++;
-    }
-
-    # state management
-    $self->state( 'wait_response' );
-    $self->_send_packet( $pkt );
+    # we simply queue, then try to dequeue, which will instantly send
+    # the packet if we can, but otherwise will do nothing.  this is done this
+    # way to ensure we don't jump the queue on anybody.
+    $self->queue_packet( 'wait_response', $pkt );
+    $self->_dequeue_packet;
     return 1;
 }
 
 # queues up a packet to go out to this backend
 sub queue_packet {
     my Proximo::MySQL::Backend $self = $_[0];
-    my Proximo::MySQL::Packet $pkt = $_[1];
 
-    # if we're already idle, send it out
-    return $self->send_packet( $pkt )
-        if $self->state eq 'idle';
+    # just push it on and let dequeue handle sending if we need to
+    push @{ $self->{pkt} }, [ $_[1], $_[2] ];
+    $self->_dequeue_packet;
+    return 1;
+}
 
-    # set to queue (of depth 1, not really a queue)
-    $self->{pkt} = $pkt;
+# send a queued packet if we can
+sub _dequeue_packet {
+    my Proximo::MySQL::Backend $self = $_[0];
+
+    # if we're already idle, see if we have a packet
+    if ( $self->state eq 'idle' &&
+         ( my $q = shift @{ $self->{pkt} } ) ) {
+
+        # if it's a command packet, we keep track of some data about it which
+        # influences how we behave in the future
+        if ( ref( $q->[1] ) eq 'Proximo::MySQL::Packet::Command' ) {     
+            $self->{last_cmd} = time;
+            $self->{cmd_type} = $q->[1]->command_type;
+            $self->{cmd_count}++;
+        }
+
+        # now setup and go
+        $self->state( $q->[0] );
+        return $self->_send_packet( $q->[1] );
+    }
+
+    # just return
     return 1;
 }
 
@@ -399,6 +438,31 @@ sub as_string {
 sub allow_writes {
     my Proximo::MySQL::Backend $self = $_[0];
     return $self->{writable};
+}
+
+# return what state commands we've run (hashref, or nothing)
+sub state_commands {
+    my Proximo::MySQL::Backend $self = $_[0];
+    return $self->{state_cmds};
+}
+
+# run a state command on this backend
+sub run_state_command {
+    my Proximo::MySQL::Backend $self = $_[0];
+    my $cmd = $_[1];
+
+    # see if we ran this already
+    my $hr = ( $self->{state_cmds} ||= {} );
+    return 1 if $hr->{$cmd};
+    $hr->{$cmd} = 1;
+
+    # send this command to the backend
+    Proximo::debug( 'Queueing state command on backend: %s.', $cmd );
+    $self->queue_packet(
+            'run_state_command',
+            Proximo::MySQL::Packet::Command->new( 3, $cmd )
+        );
+    return 1;
 }
 
 1;

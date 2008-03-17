@@ -359,7 +359,6 @@ sub query {
 
     # analyze the query
     my $q = Proximo::MySQL::Query->new( $q_type, $q_ref );
-    my $do_pin = 0;
 
     # if it's a write, we peg sticky on and note that
     if ( $q->is_write ) {
@@ -368,27 +367,66 @@ sub query {
 
     # it might be a state command?  if so, then we need to enable pinning
     } elsif ( $q->is_state_command ) {
-        # FIXME: we can handle state commands right here, since they get sent to all
-        # backends that we have that are pinned, and if we have no pinned backends, then
-        # we clear out any we do have and prepare to pin the next one that comes in
-        Proximo::fatal( 'Teach me to handle state commands.' );
+        # add the state command
+        Proximo::debug( 'Detected state command, pinning enabled for client.' );
+        $inst->add_state_command( $$q_ref );
+        
+        # and now execute it on backends
+        foreach my $be ( $inst->pinned_readonly_backend, $inst->pinned_readwrite_backend ) {
+            next unless defined $be;
 
+            $be->run_state_command( $$q_ref );
+        }
+        
+        # blow away a backend if we had one sitting around
+        if ( my $be = $inst->backend ) {
+            # detach this backend from the instance
+            $be->inst( undef );
+            $inst->backend( undef );
+
+            # we only care if we have executed state commands on this backend, if so,
+            # then blow it away
+            if ( $be->state_commands ) {
+                $be->close( 'closing_stateful' );
+
+            # if we didn't then we can return this to the pool
+            } else {
+                $self->backend_available( $be );
+
+            }
+        }
+
+        # since this is just a state command we just return
+        # FIXME: this assumes that the user is sending a valid state command, we probably
+        # don't want to be doing this...
+        return $self->_send_packet(
+                Proximo::MySQL::Packet::OK->new( $self, $packet->sequence_number + 1 ),
+            );
     }
 
     # helper sub, this does the right thing for sending a query to a particular
     # backend, regardless of what it us
     my $query_to = sub {
-        my Proximo::MySQL::Backend $be = $_[0];
+        my $allow_writes = $_[0];
+        my Proximo::MySQL::Backend $be = $_[1];
 
         # note that the backend could be undefined
         if ( defined $be ) {
-            # but if it's not, queue up a packet to send;  we have to queue because the
-            # backend might not be ready to accept it.
-            $inst->backend( $_[0] );
-            $inst->backend->queue_packet(
+            # pin it if necessary
+            if ( $inst->state_commands ) {
+                if ( $allow_writes ) {
+                    $inst->pinned_readwrite_backend( $be );
+                } else {
+                    $inst->pinned_readonly_backend( $be );
+                }
+            }
+
+            # but if it's not, send a packet
+            $inst->backend( $be );
+            $inst->backend->send_packet(
                     Proximo::MySQL::Packet::Command->new( $q_type, $q_ref )
                 );
-                
+
         # and if it is, we send an error
         } else {
             $inst->client->_send_packet(
@@ -404,7 +442,8 @@ sub query {
     # already...
     if ( $inst->sticky ) {
         # see if they have a backend already
-        $query_to->( $inst->pinned_readwrite_backend ||
+        $query_to->( 1,
+                     $inst->pinned_readwrite_backend ||
                      $inst->backend ||
                      $self->get_readwrite_backend( $inst ) );
 
@@ -422,7 +461,8 @@ sub query {
         }
 
         # now do the logic of 
-        $query_to->( $inst->pinned_readonly_backend ||
+        $query_to->( 0,
+                     $inst->pinned_readonly_backend ||
                      $self->get_readonly_backend( $inst ) );
 
     }
@@ -522,6 +562,7 @@ sub backend {
 sub pinned_readwrite_backend {
     my Proximo::MySQL::Cluster::Instance $self = $_[0];
     if ( scalar( @_ ) == 2 ) {
+        Proximo::debug( 'Pinning readwrite backend %s.', $_[1] || '(undef)' );
         $_[1]->inst( $self )
             if defined $_[1];
         return $self->{pinned_rw} = $_[1];
@@ -533,6 +574,7 @@ sub pinned_readwrite_backend {
 sub pinned_readonly_backend {
     my Proximo::MySQL::Cluster::Instance $self = $_[0];
     if ( scalar( @_ ) == 2 ) {
+        Proximo::debug( 'Pinning readonly backend %s.', $_[1] || '(undef)' );
         $_[1]->inst( $self )
             if defined $_[1];
         return $self->{pinned_ro} = $_[1];
