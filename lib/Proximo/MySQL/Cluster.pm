@@ -225,7 +225,8 @@ sub _get_backend {
 
     # try to return the first available backend, we have to be wary about
     # them being closed here
-    while ( my $be = shift( @{ $self->{backends}->{$ipport} || [] } ) ) {
+    my $key = "$allow_writes-$ipport";
+    while ( my $be = shift( @{ $self->{backends}->{$key} || [] } ) ) {
         # do a little sanity check
         unless ( $be->state eq 'idle' &&
                  $be->allow_writes == $allow_writes ) {
@@ -234,15 +235,15 @@ sub _get_backend {
             next;
         }
 
-        Proximo::debug( 'EXISTING backend to %s.', $ipport );
+        Proximo::debug( 'EXISTING backend to %s.', $key );
         return $be;
     }
 
     # guess none available, so make a new one and return it.  note that we
     # attempt to create the backends hash entry so later we can accept this
     # node coming back to us.
-    Proximo::debug( 'CREATING backend to %s.', $ipport );
-    $self->{backends}->{$ipport} ||= [];
+    Proximo::debug( 'CREATING backend to %s.', $key );
+    $self->{backends}->{$key} ||= [];
     return Proximo::MySQL::Backend->new( $inst, $ipport, $allow_writes );
 }
 
@@ -252,10 +253,11 @@ sub backend_available {
     my Proximo::MySQL::Backend $be = $_[1];
 
     # push onto end of list for the ipport
-    return Proximo::warn( 'Cluster %s told about backend %s which is not ours?', $self->name, $be->ipport )
-        unless exists $self->{backends}->{ $be->ipport };
-    Proximo::debug( 'Cluster %s accepting idle backend %s to pool.', $self->name, $be->ipport );
-    push @{ $self->{backends}->{ $be->ipport } ||= [] }, $be;
+    my $key = $be->allow_writes . '-' . $be->ipport;
+    return Proximo::warn( 'Cluster %s told about backend %s which is not ours?', $self->name, $key )
+        unless exists $self->{backends}->{$key};
+    Proximo::debug( 'Cluster %s accepting idle backend %s to pool.', $self->name, $key );
+    push @{ $self->{backends}->{$key} ||= [] }, $be;
     return 1;
 }
 
@@ -355,15 +357,19 @@ sub query {
         }
     }
 
-    # at this point, if the user is NOT in sticky mode, we analyze the query and see
-    # if we should go into sticky (readwrite) mode
-    unless ( $inst->sticky ) {
-        # analyze the query
-        my $q = Proximo::MySQL::Query->new( $q_type, $q_ref );
-        if ( $q->is_write ) {
-            $inst->sticky( 1 );
-            $inst->note_write_query;
-        }
+    # analyze the query
+    my $q = Proximo::MySQL::Query->new( $q_type, $q_ref );
+    my $do_pin = 0;
+
+    # if it's a write, we peg sticky on and note that
+    if ( $q->is_write ) {
+        $inst->sticky( 1 );
+        $inst->note_write_query;
+
+    # it might be a state command?  if so, then we need to enable pinning
+    } elsif ( $q->is_state_command ) {
+        $do_pin = 1;
+
     }
 
     # helper sub, this does the right thing for sending a query to a particular
@@ -395,7 +401,8 @@ sub query {
     # already...
     if ( $inst->sticky ) {
         # see if they have a backend already
-        $query_to->( $inst->backend ||
+        $query_to->( $inst->pinned_readwrite_backend ||
+                     $inst->backend ||
                      $self->get_readwrite_backend( $inst ) );
 
     # if sticky is not on, then let's go ahead and just get them a readable backend
@@ -412,7 +419,8 @@ sub query {
         }
 
         # now do the logic of 
-        $query_to->( $self->get_readonly_backend( $inst ) );
+        $query_to->( $inst->pinned_readonly_backend ||
+                     $self->get_readonly_backend( $inst ) );
 
     }
 }
@@ -434,6 +442,9 @@ use fields (
         'last_cmd',  # timestamp of last command (client -> backend)
         'last_pkt',  # timestamp of last packet (backend -> client)
         'last_wrt',  # timestamp of last write command (client -> backend)
+        'pinned_ro', # pinned readonly backend
+        'pinned_rw', # pinned readwrite backend
+        'states',    # statements used for state (i.e. SET commands)
     );
 
 # construct a new instance for somebody
@@ -442,14 +453,17 @@ sub new {
     $self = fields::new( $self ) unless ref $self;
 
     # get parameters
-    $self->{cluster}  = $_[1];
-    $self->{client}   = $_[2];
-    $self->{backend}  = undef;
-    $self->{sticky}   = 0;
-    $self->{in_trans} = 0;
-    $self->{last_cmd} = time;
-    $self->{last_pkt} = time;
-    $self->{last_wrt} = 0;
+    $self->{cluster}   = $_[1];
+    $self->{client}    = $_[2];
+    $self->{backend}   = undef;
+    $self->{sticky}    = 0;
+    $self->{in_trans}  = 0;
+    $self->{last_cmd}  = time;
+    $self->{last_pkt}  = time;
+    $self->{last_wrt}  = 0;
+    $self->{pinned_ro} = undef;
+    $self->{pinned_rw} = undef;
+    $self->{states}    = [];
 
     # all good
     return $self;
@@ -473,6 +487,23 @@ sub cluster {
     return $self->{cluster};
 }
 
+# return arrayref of state commands
+sub state_commands {
+    my Proximo::MySQL::Cluster::Instance $self = $_[0];
+    return $self->{states};
+}
+
+# add command to list of state commands, but only if that exact command is not
+# already in the so-called list
+sub add_state_command {
+    my Proximo::MySQL::Cluster::Instance $self = $_[0];
+    foreach my $cmd ( @{ $self->state_commands } ) {
+        return if $cmd eq $_[1];
+    }
+    push @{ $self->state_commands }, $_[1];
+    return 1;
+}
+
 # get/set our backend
 sub backend {
     my Proximo::MySQL::Cluster::Instance $self = $_[0];
@@ -482,6 +513,28 @@ sub backend {
         return $self->{backend} = $_[1];
     }
     return $self->{backend};
+}
+
+# get/set our backend
+sub pinned_readwrite_backend {
+    my Proximo::MySQL::Cluster::Instance $self = $_[0];
+    if ( scalar( @_ ) == 2 ) {
+        $_[1]->inst( $self )
+            if defined $_[1];
+        return $self->{pinned_rw} = $_[1];
+    }
+    return $self->{pinned_rw};
+}
+
+# get/set our backend
+sub pinned_readonly_backend {
+    my Proximo::MySQL::Cluster::Instance $self = $_[0];
+    if ( scalar( @_ ) == 2 ) {
+        $_[1]->inst( $self )
+            if defined $_[1];
+        return $self->{pinned_ro} = $_[1];
+    }
+    return $self->{pinned_ro};
 }
 
 # time of last command

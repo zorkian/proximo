@@ -12,6 +12,8 @@ use fields (
         'raw_qtype',   # query type
         'raw_qref',    # scalar ref of query
         'is_write',    # is a write query
+        'is_stateful', # not a write, but uses state information
+        'is_statecmd', # i.e. a SET command, puts some state on the connection 
     );
 
 # construct a new query object
@@ -20,9 +22,11 @@ sub new {
     $self = fields::new( $self ) unless ref $self;
 
     # set innards
-    $self->{raw_qtype} = $_[1];
-    $self->{raw_qref}  = $_[2];
-    $self->{is_write}  = undef;
+    $self->{raw_qtype}   = $_[1];
+    $self->{raw_qref}    = $_[2];
+    $self->{is_write}    = undef;
+    $self->{is_stateful} = 0;
+    $self->{is_statecmd} = 0;
 
     # and analyze!
     $self->analyze;
@@ -59,6 +63,12 @@ sub analyze {
             $self->{is_write} = 0;
         }
 
+    # see if it might be a state command
+    } elsif ( ${ $self->{raw_qref} } =~ /^\s*SET\s+/i ) {
+        Proximo::debug( 'Query suspected a state command.' );
+        $self->{is_write}    = 0;
+        $self->{is_statecmd} = 1; 
+
     # if it flat out didn't match the query, then it's a write
     } else {
         Proximo::debug( 'Query definitely a write.' );
@@ -73,6 +83,12 @@ sub analyze {
 sub is_write {
     my Proximo::MySQL::Query $self = $_[0];
     return $self->{is_write};
+}
+
+# if something is a state command or not
+sub is_state_command {
+    my Proximo::MySQL::Query $self = $_[0];
+    return $self->{is_statecmd};
 }
 
 1;
