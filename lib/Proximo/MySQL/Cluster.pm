@@ -378,7 +378,12 @@ sub query {
 
     # if it's a write, we peg sticky on and note that
     if ( $q->is_write ) {
-        $inst->sticky( 1 );
+        # FIXME: this is a hack for bugzilla, to make this query go to the writes, but not
+        # to turn on sticky.  because we don't want to sticky for this query which is run
+        # on every request...
+        unless ( $$q_ref =~ /^UPDATE logincookies.+$/is ) {
+            $inst->sticky( 1 );            
+        }
         $inst->note_write_query;
 
     # it might be a state command?  if so, then we need to enable pinning
@@ -475,7 +480,7 @@ sub query {
     # so by this point we know what's going on with the query, so let's actually
     # figure out what backend to send it to.  if we're sticky they might have a backend
     # already...
-    if ( $inst->sticky ) {
+    if ( $q->is_write || $inst->sticky ) {
         # see if they have a backend already
         $query_to->( 1,
                      $inst->pinned_readwrite_backend ||
