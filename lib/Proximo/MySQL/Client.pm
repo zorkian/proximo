@@ -26,6 +26,8 @@ sub new {
     # set some internal shizzle
     $self->{mode}          = 1;        # server mode
     $self->{state}         = 'init';   # initial state
+    $self->{cluster_inst}  = undef;
+    $self->{sequence}      = undef;
 
     # try to get a cluster instance
     if ( my $cluster = $self->service->proxy_to ) {

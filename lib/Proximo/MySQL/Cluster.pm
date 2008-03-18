@@ -252,10 +252,26 @@ sub backend_available {
     my Proximo::MySQL::Cluster $self = $_[0];
     my Proximo::MySQL::Backend $be = $_[1];
 
+    # deny this backend if the instance is pinning
+    my $inst = $be->inst;
+    if ( $inst && $inst->pins ) {
+        Proximo::debug( 'Cluster keeping pinned backend out of the pool.' );
+        $inst->backend( undef );
+        return 1;
+    }
+
     # push onto end of list for the ipport
     my $key = $be->allow_writes . '-' . $be->ipport;
     return Proximo::warn( 'Cluster %s told about backend %s which is not ours?', $self->name, $key )
         unless exists $self->{backends}->{$key};
+
+    # now detach it from the instance it had
+    if ( $inst ) {
+        $inst->backend( undef );
+        $be->inst( undef );
+    }
+
+    # we're good, note and store
     Proximo::debug( 'Cluster %s accepting idle backend %s to pool.', $self->name, $key );
     push @{ $self->{backends}->{$key} ||= [] }, $be;
     return 1;
@@ -337,7 +353,7 @@ sub query {
     my Proximo::MySQL::Cluster $self = $_[0];
     my Proximo::MySQL::Cluster::Instance $inst = $_[1];
     my ( $q_type, $q_ref ) = ( $_[2], $_[3] );
-    
+
     # annotate that we've gotten this far
     Proximo::debug( 'Cluster %s handling type=%d query=%s.', $self->name, $q_type, $$q_ref );
 
@@ -370,17 +386,20 @@ sub query {
         # add the state command
         Proximo::debug( 'Detected state command, pinning enabled for client.' );
         $inst->add_state_command( $$q_ref );
-        
+
         # and now execute it on backends
         foreach my $be ( $inst->pinned_readonly_backend, $inst->pinned_readwrite_backend ) {
             next unless defined $be;
 
+            Proximo::debug( '%s running state command immediately: %s.', $be, $$q_ref );
             $be->run_state_command( $$q_ref );
         }
-        
+
         # blow away a backend if we had one sitting around
         if ( my $be = $inst->backend ) {
-            # detach this backend from the instance
+            # detach this backend from the instance, otherwise closing it will blow away the
+            # client, which would be sad.  NOTE: this is normally all done by backend_available,
+            # I don't really like doing this here.  be that as it may...
             $be->inst( undef );
             $inst->backend( undef );
 
@@ -399,8 +418,8 @@ sub query {
         # since this is just a state command we just return
         # FIXME: this assumes that the user is sending a valid state command, we probably
         # don't want to be doing this...
-        return $self->_send_packet(
-                Proximo::MySQL::Packet::OK->new( $self, $packet->sequence_number + 1 ),
+        return $inst->client->_send_packet(
+                Proximo::MySQL::Packet::OK->new( $inst->client, $inst->client->next_sequence ),
             );
     }
 
@@ -414,11 +433,19 @@ sub query {
         if ( defined $be ) {
             # pin it if necessary
             if ( $inst->state_commands ) {
+                # pin this backend
                 if ( $allow_writes ) {
                     $inst->pinned_readwrite_backend( $be );
                 } else {
                     $inst->pinned_readonly_backend( $be );
                 }
+                
+                # now execute state commands if needed
+                # FIXME: this is grossly inefficient with any sort of volume, this needs to be redone in
+                # a way that will work well at scale.  perhaps we keep a generation count of the number of
+                # state commands used, then we just compare a simple number.
+                $be->run_state_command( $_ )
+                    foreach @{ $inst->state_commands };
             }
 
             # but if it's not, send a packet
@@ -455,8 +482,6 @@ sub query {
         # of doing logic here to determine that, we just free it up and get a new one.
         if ( my $be = $inst->backend ) {
             Proximo::debug( 'Freeing up sticky backend.' );
-            $be->inst( undef );
-            $inst->backend( undef );
             $self->backend_available( $be );
         }
 
@@ -506,7 +531,7 @@ sub new {
     $self->{last_wrt}  = 0;
     $self->{pinned_ro} = undef;
     $self->{pinned_rw} = undef;
-    $self->{states}    = [];
+    $self->{states}    = undef;
 
     # all good
     return $self;
@@ -540,10 +565,10 @@ sub state_commands {
 # already in the so-called list
 sub add_state_command {
     my Proximo::MySQL::Cluster::Instance $self = $_[0];
-    foreach my $cmd ( @{ $self->state_commands } ) {
+    foreach my $cmd ( @{ $self->{states} ||= [] } ) {
         return if $cmd eq $_[1];
     }
-    push @{ $self->state_commands }, $_[1];
+    push @{ $self->{states} }, $_[1];
     return 1;
 }
 
@@ -583,7 +608,7 @@ sub pinned_readonly_backend {
 }
 
 # time of last command
-sub last_command {    
+sub last_command {
     my Proximo::MySQL::Cluster::Instance $self = $_[0];
     return $self->{last_cmd};
 }
@@ -609,7 +634,7 @@ sub last_write {
 # age
 sub last_write_age {
     my Proximo::MySQL::Cluster::Instance $self = $_[0];
-    return abs( time - ( $self->{last_wrt} || 0 ) );    
+    return abs( time - ( $self->{last_wrt} || 0 ) );
 }
 
 # note that we just sent a write query
@@ -679,18 +704,21 @@ sub destroy_links {
 # when a backend finishes with stuff they call this
 sub backend_idle {
     my Proximo::MySQL::Cluster::Instance $self = $_[0];
-    
+
     # if sticky, bail
     return 1 if $self->sticky;
-    
+
     # okay, let's free it up to the pool
     my $be = $self->backend;
-    if ( defined $be ) {
-        $be->inst( undef );
-        $self->{backend} = undef;
-        $self->cluster->backend_available( $be );
-    }
+    $self->cluster->backend_available( $be )
+        if defined $be;
     return 1;
+}
+
+# true if we are pinning backends
+sub pins {
+    my Proximo::MySQL::Cluster::Instance $self = $_[0];
+    return $self->{states} ? 1 : 0;
 }
 
 1;
