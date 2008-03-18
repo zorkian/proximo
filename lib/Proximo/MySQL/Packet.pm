@@ -196,7 +196,7 @@ sub _build {
     $buf = substr( pack( 'V', length( $buf ) ), 0, 3) . chr( $self->{seq} ) . $buf;
 
     # debugging makes us happy (I am OCD about comments...)
-    Proximo::debug( "Built packet of \%d bytes.", length( $buf ) );
+    #Proximo::debug( "Built packet of \%d bytes.", length( $buf ) );
     
     # save the raw, return length of this new total packet
     $self->{raw} = \$buf;

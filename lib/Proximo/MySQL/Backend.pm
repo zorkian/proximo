@@ -77,12 +77,12 @@ sub inst {
     # if they're changing the instance we're on...
     if ( scalar( @_ ) == 2 ) {
         my $inst = $self->{cluster_inst} = $_[1];
-        Proximo::debug( '%s has new instance %s.', $self, $inst || '(undef)' );
+        #Proximo::debug( '%s has new instance %s.', $self, $inst || '(undef)' );
 
         # ...then we might need to change databases!
         if ( defined $inst ) {
-            Proximo::debug( 'Backend getting cluster instance: client db=%s, my db=%s.',
-                            $inst->client->current_database, $self->current_database );
+            #Proximo::debug( 'Backend getting cluster instance: client db=%s, my db=%s.',
+            #                $inst->client->current_database, $self->current_database );
             $self->switch_database( $inst->client->current_database )
                 if $inst->client->current_database ne $self->current_database;
         }
@@ -100,7 +100,6 @@ sub event_packet {
     my Proximo::MySQL::Backend $self = $_[0];
     
     my ( $seq, $packet_raw ) = ( $_[1], $_[2] );
-    Proximo::debug( 'Backend processing packet with sequence %d of length %d bytes.', $seq, length( $$packet_raw ) );
 
     # depending on state, could be any sort of packet...
     if ( $self->state eq 'connecting' ) {

@@ -74,7 +74,6 @@ sub event_packet {
     my Proximo::MySQL::Client $self = $_[0];
 
     my ( $seq, $packet_raw ) = ( $_[1], $_[2] );
-    Proximo::debug( 'Server processing packet with sequence %d of length %d bytes.', $seq, length( $$packet_raw ) );
     
     # save sequence
     $self->{sequence} = $seq;
