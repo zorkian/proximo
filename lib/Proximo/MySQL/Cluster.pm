@@ -432,7 +432,12 @@ sub query {
         # note that the backend could be undefined
         if ( defined $be ) {
             # query log goes here
-            Proximo::log( 'To %s: %s', $be->ipport, $$q_ref );
+            my $qq = $$q_ref;
+            $qq =~ s/[\r\n\0]+/ /sg;
+            Proximo::log( '[%s:%d -> %s(%d): %s%s%s] %s',
+                          $inst->client->remote_ip, $inst->client->remote_port, $be->ipport, $be->command_count,
+                          ( $allow_writes ? 'rw' : 'ro' ), ( $inst->sticky ? ' sticky' : '' ),
+                          ( $inst->pins ? ' pins' : '' ), $qq );
 
             # pin it if necessary
             if ( $inst->state_commands ) {
