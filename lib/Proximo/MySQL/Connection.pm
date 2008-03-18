@@ -125,19 +125,22 @@ sub event_read {
     }
 
     # now try to bang some packets off
-    my $buflen = length( $self->{buffer} );
-    while ( $buflen >= 4 ) {
+    while ( my $hdr = substr( $self->{buffer}, 0, 4 ) ) {
+        # bail unless we got a full header
+        return unless length( $hdr ) == 4;
+
         # now get length of this packet and then packet sequence number
-        my $len = unpack( 'V', substr( $self->{buffer}, 0, 3 ) . "\0" );
-        my $seq = unpack( 'C', substr( $self->{buffer}, 3, 1 ) );
-        last unless $buflen >= $len + 4;
+        my $len = unpack( 'V', substr( $hdr, 0, 3 ) . "\0" );
+        my $seq = unpack( 'C', substr( $hdr, 3, 1 ) );
+
+        # try to get the packet data
+        my $packet_raw = substr( $self->{buffer}, 4, $len ) . "\0";
+        return unless length( $packet_raw ) == $len + 1;
 
         # we've got the full thing, rip it out; note we append a null here because
         # the protocol likes to stick strings at the end of a packet and this is
         # the easiest way for us to parse them out
-        my $packet_raw = substr( $self->{buffer}, 4, $len ) . "\0";
         $self->{buffer} = substr( $self->{buffer}, 4 + $len );
-        $buflen = length( $self->{buffer} );
 
         # pass this raw packet data to our children
         $self->event_packet( $seq, \$packet_raw );
