@@ -64,7 +64,7 @@ sub _send_packet {
     # write out the built packet, and also turn on watching for writability
     # to ensure that we finish sending this packet out
     my $raw = $packet->_raw;
-    Proximo::debug( 'Preparing to write %d bytes.', length( $$raw ) );
+    #Proximo::debug( 'Preparing to write %d bytes.', length( $$raw ) );
 
     # now send and turn on watching for writable notifications
     $self->write( $raw );
@@ -120,7 +120,7 @@ sub event_read {
         last unless $$read;
 
         # got some bytes, let's append to our internal buffer
-        Proximo::debug( 'Read %d bytes from socket.', length( $$read ) );
+        #Proximo::debug( 'Read %d bytes from socket.', length( $$read ) );
         $self->{buffer} .= $$read;
     }
 

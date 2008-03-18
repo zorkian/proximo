@@ -117,6 +117,11 @@ sub exec_management_command {
         # main screen turn on (comment OCD strikes again)
         return $svc->enable;
 
+    # enable/disable query logging
+    } elsif ( $cmd =~ /^query_log\s+(.+)$/i ) {
+        Proximo->QueryLog( $1 );
+    
+    # done here
     } else {
         if ( $ctx->{errors_fatal} ) {
             Proximo::fatal( 'Unknown configuration command: %s.', $cmd );

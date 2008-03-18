@@ -13,7 +13,7 @@ use constant VERBOSITY => 3; # 0 = quiet (no warnings), 1 = normal (warnings),
                              # 2 = verbose (info), 3 = very verbose (debug)
 
 our $VERSION = '0.01';
-our ( %Hooks );
+our ( %Hooks, $QLogFN );
 
 # create a new instance of Proximo ... basically defines what exactly we are
 # going to be doing and how we're getting there
@@ -21,6 +21,14 @@ sub LoadConfigFile {
     my ( $class, $fn ) = @_;
     Proximo::info( 'Loading configuration from %s.', $fn );
     Proximo::Configuration::load_config_file( $fn );
+}
+
+# turns the query log on/off and where to put it
+sub QueryLog {
+    my ( $class, $fn ) = @_;
+    Proximo::info( 'Setting query log to %s.', $fn );
+    $QLogFN = $fn;
+    Proximo::log( 'Starting log.' );
 }
 
 # called on a fatal error.  put ## in your string to insert the contents of
@@ -65,6 +73,16 @@ sub debug {
     $string =~ s/[\r\n]+$//;
     printf "[DBUG] \%s > $string\n", scalar(localtime), @args
         if VERBOSITY >= 3;
+}
+
+# writes to the query log
+sub log {
+    my ( $string, @args ) = @_;
+    return unless defined $QLogFN;
+    open FILE, ">>$QLogFN"
+        or Proximo::fatal( 'Unable to write to query log: ##.' );
+    print FILE sprintf( "[QLOG] \%s > $string\n", scalar(localtime), @args );
+    close FILE;
 }
 
 # die with a backtrace

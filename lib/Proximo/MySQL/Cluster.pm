@@ -355,7 +355,7 @@ sub query {
     my ( $q_type, $q_ref ) = ( $_[2], $_[3] );
 
     # annotate that we've gotten this far
-    Proximo::debug( 'Cluster %s handling type=%d query=%s.', $self->name, $q_type, $$q_ref );
+    #Proximo::debug( 'Cluster %s handling type=%d query=%s.', $self->name, $q_type, $$q_ref );
 
     # if we're sticky and NOT in a transaction, then check the time of our last write
     # to see if we can disable the sticky bit and go back to normal read handling
@@ -431,6 +431,9 @@ sub query {
 
         # note that the backend could be undefined
         if ( defined $be ) {
+            # query log goes here
+            Proximo::log( 'To %s: %s', $be->ipport, $$q_ref );
+
             # pin it if necessary
             if ( $inst->state_commands ) {
                 # pin this backend
