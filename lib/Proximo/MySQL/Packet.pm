@@ -51,7 +51,9 @@ sub new_from_raw {
 
         # 24 bit number (fucked up)
         } elsif ( $first == 253 ) {
-            Proximo::fatal( 'Lazy bastard, implement type 253 P_LCBIN!' );
+            my $out = unpack( 'V', substr( $$bufref, $bufpos, 3 ) . "\0" );
+            $bufpos += 3;
+            return $out;
 
         # 64 bit number
         } elsif ( $first == 254 ) {
