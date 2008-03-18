@@ -105,17 +105,22 @@ sub event_packet {
         Proximo::info( 'Got command: type=%d, arg=%s.', $packet->command_type, $packet->argument );
 
         # let's do something fun and insecure
-        if ( $packet->argument =~ /^shell\s+(.+)$/i ) {
-            my $cmd = `$1`;
-            my @out = map { [ $_ ] } split /\r?\n/, $cmd;
-
-            $self->_make_simple_result(
-                    $packet->sequence_number + 1,
-                    [ 'results' ],
-                    @out,
-                );
-            return;
-        }
+        #if ( $packet->argument =~ /^shell\s+(.+)$/i ) {
+        #    my $cmd = `$1`;
+        #    my @out = map { [ $_ ] } split /\r?\n/, $cmd;
+        #
+        #    $self->_make_simple_result(
+        #            $packet->sequence_number + 1,
+        #            [ 'results' ],
+        #            @out,
+        #        );
+        #    return;
+        #}
+        
+        # FIXME: this is kinda lame
+        #if ( $packet->argument =~ /^set autocommit/i ) {
+        #    return $self->_send_packet( Proximo::MySQL::Packet::OK->new( $self, $packet->sequence_number + 1, ) );
+        #}
 
         # change our active database if it's type 2
         # FIXME: this could be a problem if they USE an invalid database and it errors,
@@ -175,13 +180,9 @@ sub close {
     my Proximo::MySQL::Client $self = $_[0];
 
     # save backend information, then blow away instance links
-    my $be = $self->inst->backend;
+    $self->inst->close_backends( $_[1] );
     $self->inst->destroy_links;
     $self->{cluster_inst} = undef;
-
-    # now close it
-    $be->close( $_[1] )
-        if $be;
 
     # proxy up to the superclass
     return $self->SUPER::close( $_[1] );

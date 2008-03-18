@@ -52,6 +52,10 @@ sub event_read {
                 $self->write_line( '%s: %s', $svc_name, $svcs->{$svc_name} );
             }
             $self->write_line( '---' );
+            
+        # exit
+        } elsif ( $line eq 'shutdown' ) {
+            exit 0;
 
         # maybe it's a configuration command, try that
         } else {

@@ -50,7 +50,7 @@ sub is_client {
 sub state {
     my Proximo::MySQL::Connection $self = $_[0];
     if ( scalar( @_ ) == 2 ) {
-        Proximo::debug( "$self entering state $_[1]." );
+        #Proximo::debug( "$self entering state $_[1]." );
         return $self->{state} = $_[1];
     }
     return $self->{state};

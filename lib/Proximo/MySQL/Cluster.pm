@@ -711,6 +711,29 @@ sub destroy_links {
     $self->{cluster} = undef;
     $self->{client}  = undef;
     $self->{backend} = undef;
+    $self->{pinned_ro} = undef;
+    $self->{pinned_rw} = undef;
+    return 1;
+}
+
+# close all open backends
+sub close_backends {
+    my Proximo::MySQL::Cluster::Instance $self = $_[0];
+
+    # preserve our client however
+    my $cl = $self->{client};
+    $self->{client} = undef;
+
+    # now blow them away
+    $self->{backend}->close( $_[1] )
+        if $self->{backend};
+    $self->{pinned_ro}->close( $_[1] )
+        if $self->{pinned_ro};
+    $self->{pinned_rw}->close( $_[1] )
+        if $self->{pinned_rw};
+
+    # restore client
+    $self->{client} = $cl;
     return 1;
 }
 
