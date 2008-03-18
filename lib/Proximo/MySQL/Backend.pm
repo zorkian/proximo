@@ -110,7 +110,11 @@ sub event_packet {
         # now let's send an authentication packet
         $self->state( 'authenticating' );
         $self->_send_packet(
-                Proximo::MySQL::Packet::ClientAuthentication->new( $self, $packet->sequence_number + 1, )
+                Proximo::MySQL::Packet::ClientAuthentication->new(
+                        $self,
+                        $packet->sequence_number + 1,
+                        $packet->scramble_buffer,
+                    )
             );
 
     # second stage, get a packet back from the server

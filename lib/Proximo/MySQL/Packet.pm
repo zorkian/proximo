@@ -249,7 +249,7 @@ sub new {
     # setup a new scramble buff of 23 bytes...
     $self->{scramble} = '';
     $self->{scramble} .= chr( int( rand( 256 ) ) )
-        foreach 1..21;
+        foreach 1..20;
 
     # now put together the packet itself
     $self->_build(
@@ -263,6 +263,7 @@ sub new {
             P_SHORT,   SERVER_STATUS_AUTOCOMMIT,
             P_RAW,     "\0" x 13,       # more filler bytes
             P_RAW,     substr( $self->{scramble}, 8, 13 ),
+            P_RAW,     "\0",            # not really null terminated, but kinda
         );
 
     return $self;
@@ -285,7 +286,7 @@ sub new_from_raw {
     $self->{protocol_id} = $data[0];
     $self->{version}     = $data[1];
     $self->{thread_id}   = $data[2];
-    $self->{scramble}    = $data[3] . $data[9]; # two chunks
+    $self->{scramble}    = substr( $data[3] . $data[9], 0, 20 ); # two chunks
     $self->{flags}       = $data[5];
     $self->{charset}     = $data[6];
     $self->{caps}        = $data[7];
@@ -340,6 +341,7 @@ package Proximo::MySQL::Packet::ClientAuthentication;
 use strict;
 use Proximo::MySQL::Constants;
 use Proximo::MySQL::Packet;
+use Proximo::MySQL::Util;
 use base 'Proximo::MySQL::Packet';
 
 use fields (
@@ -352,6 +354,7 @@ use fields (
     );
 
 # create a packet to send out
+# arguments: ( self, connection, sequence, server handshake scramble buffer )
 sub new {
     my Proximo::MySQL::Packet::ClientAuthentication $self = $_[0];
     $self = fields::new( $self ) unless ref $self;
@@ -368,10 +371,10 @@ sub new {
             P_BYTE,    0x21,        # language, again, latin?
             P_RAW,     "\0" x 23,   # filler
             P_NULLSTR, $conn->service->proxy_user,
-            # FIXME: need a way to have this not be here if we have no scramble buff...
-            # ugh, the mysql protocol is kinda retarded in this case
-            #P_LCBIN,   0,           # SCRAMBLE BUFF GOES HERE FIXME FIXME
-            P_BYTE,    0,           # filler
+            P_LCSTR,   Proximo::MySQL::Util::get_password_digest( $_[3], $conn->service->proxy_pass ),
+            # MySQL Protocol document lies, there is no filler byte here.  took quite a while
+            # to figure out what was going on here.  :-(
+            #P_BYTE,    0,           # filler
             P_NULLSTR, $conn->current_database,
         );
 
@@ -401,25 +404,25 @@ sub new_from_raw {
 
 # return the database they want to use
 sub database {
-    my Proximo::MySQL::Packet::ClientAuthentication $self = shift;
+    my Proximo::MySQL::Packet::ClientAuthentication $self = $_[0];
     return $self->{database};
 }
 
 # return the user they're trying to connect as
 sub user {
-    my Proximo::MySQL::Packet::ClientAuthentication $self = shift;
+    my Proximo::MySQL::Packet::ClientAuthentication $self = $_[0];
     return $self->{user};
 }
 
 # return the client's password (scrambled)
 sub scramble_buffer {
-    my Proximo::MySQL::Packet::ClientAuthentication $self = shift;
+    my Proximo::MySQL::Packet::ClientAuthentication $self = $_[0];
     return $self->{scramble};
 }
 
 # get the max packet size
 sub max_packet_size {
-    my Proximo::MySQL::Packet::ClientAuthentication $self = shift;
+    my Proximo::MySQL::Packet::ClientAuthentication $self = $_[0];
     return $self->{max_packet_size};
 }
 
