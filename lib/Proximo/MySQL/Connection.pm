@@ -61,14 +61,8 @@ sub _send_packet {
     my Proximo::MySQL::Connection $self = $_[0];
     my Proximo::MySQL::Packet $packet = $_[1];
 
-    # write out the built packet, and also turn on watching for writability
-    # to ensure that we finish sending this packet out
-    my $raw = $packet->_raw;
-    #Proximo::debug( 'Preparing to write %d bytes.', length( $$raw ) );
-
-    # now send and turn on watching for writable notifications
-    $self->write( $raw );
-    $self->watch_write( 1 );
+    # write out the built packet
+    $self->write( $packet->_raw );
 }
 
 # creates a few packets to make a simple result set and then stuffs them into

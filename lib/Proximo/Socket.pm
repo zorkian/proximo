@@ -88,7 +88,6 @@ sub write_line {
 
     my $string = shift;
     $self->write( sprintf( "$string\n", @_ ) );
-    $self->watch_write( 1 );
     return 1;
 }
 

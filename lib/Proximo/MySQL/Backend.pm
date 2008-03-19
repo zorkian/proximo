@@ -250,7 +250,6 @@ sub event_packet {
         } else {
             my $buf = substr( pack( 'V', length( $$packet_raw ) ), 0, 3) . chr( $seq ) . $$packet_raw;
             $self->inst->client->write( \$buf );
-            $self->inst->client->watch_write( 1 );
         }
         
         # if to go idle...
@@ -265,7 +264,6 @@ sub event_packet {
         # FIXME: this is manual and shouldn't be done this way
         my $buf = substr( pack( 'V', length( $$packet_raw ) ), 0, 3) . chr( $seq ) . $$packet_raw;
         $self->inst->client->write( \$buf );
-        $self->inst->client->watch_write( 1 );
 
         # if this is an EOF packet, set our state
         if ( $val == PEEK_EOF ) {
@@ -287,7 +285,6 @@ sub event_packet {
         # FIXME: this is manual and shouldn't be done this way
         my $buf = substr( pack( 'V', length( $$packet_raw ) ), 0, 3) . chr( $seq ) . $$packet_raw;
         $self->inst->client->write( \$buf );
-        $self->inst->client->watch_write( 1 );
 
         # if this is an EOF packet, set our state
         $self->idle

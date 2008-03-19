@@ -200,9 +200,9 @@ sub _build {
     # debugging makes us happy (I am OCD about comments...)
     #Proximo::debug( "Built packet of \%d bytes.", length( $buf ) );
     
-    # save the raw, return length of this new total packet
+    # save the raw, return ok
     $self->{raw} = \$buf;
-    return length( $buf );
+    return 1;
 }
 
 # return the wire representation of this packet
