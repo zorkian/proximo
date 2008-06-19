@@ -657,7 +657,7 @@ sub command_type {
 
 sub argument {
     my Proximo::MySQL::Packet::Command $self = $_[0];
-    return ref $self->{arg} ? $$self->{arg} : $self->{arg};
+    return ref $self->{arg} ? ${$self->{arg}} : $self->{arg};
 }
 
 sub argument_ref {

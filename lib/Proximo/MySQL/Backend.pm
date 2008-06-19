@@ -9,6 +9,7 @@ use Proximo::MySQL::Constants;
 use Proximo::MySQL::Packet;
 use Socket qw/ PF_INET IPPROTO_TCP SOCK_STREAM SOL_SOCKET SO_ERROR
                AF_UNIX PF_UNSPEC /;
+use Time::HiRes qw/ tv_interval gettimeofday /;
 use base 'Proximo::MySQL::Connection';
 
 use fields (
@@ -20,6 +21,10 @@ use fields (
         'writable',       # 1/0; our writability (just for sanity)
         'cmd_count',      # count of commands we've sent
         'state_cmds',     # hash of executed state commands
+        'random',
+        'response_bytes',
+        'request_qry',
+        'cmd_time',
     );
     
 # construction is fun for you and me
@@ -194,6 +199,10 @@ sub event_packet {
     } elsif ( $self->state eq 'wait_response' ) {
         # four possible responses in this case, let's see what we got
         my $val = unpack( 'C', substr( $$packet_raw, 0, 1 ) );
+        
+        # call out hook saying we just decoded a packet type
+        #Proximo::_run_hooks( 'backend_got_response', $self, $val );
+        $self->{cmd_time} = tv_interval( $self->{cmd_time} );
 
         # OK happens if we have no result set
         my ( $packet, $go_idle );
@@ -248,6 +257,8 @@ sub event_packet {
             $self->inst->client->_send_packet( $packet );
 
         } else {
+            $self->{response_bytes} += length( $$packet_raw );
+
             my $buf = substr( pack( 'V', length( $$packet_raw ) ), 0, 3) . chr( $seq ) . $$packet_raw;
             $self->inst->client->write( \$buf );
         }
@@ -260,6 +271,9 @@ sub event_packet {
     } elsif ( $self->state eq 'recv_fields' ) {
         # decode peek value
         my $val = unpack( 'C', substr( $$packet_raw, 0, 1 ) );
+
+        # record response bytes for this response
+        $self->{response_bytes} += length( $$packet_raw );
         
         # FIXME: this is manual and shouldn't be done this way
         my $buf = substr( pack( 'V', length( $$packet_raw ) ), 0, 3) . chr( $seq ) . $$packet_raw;
@@ -281,6 +295,10 @@ sub event_packet {
     } elsif ( $self->state eq 'recv_rows' ) {
         # decode peek value
         my $val = unpack( 'C', substr( $$packet_raw, 0, 1 ) );
+        
+        # call out hook for row data, which is atm very useless since we aren't decoding
+        # the packet and the hook can't do any transformations yet
+        $self->{response_bytes} += length( $$packet_raw );
         
         # FIXME: this is manual and shouldn't be done this way
         my $buf = substr( pack( 'V', length( $$packet_raw ) ), 0, 3) . chr( $seq ) . $$packet_raw;
@@ -311,6 +329,29 @@ sub switch_database {
     return 1;
 }
 
+sub sanitize {
+    my $q = $_[0];
+
+    # blow newlines and add spacing
+    $q =~ s/[\r\n]/ /sg;
+    $q = " $q ";
+
+    # ensure operators are always spaced
+    $q =~ s/([<=>!]+)/ $1 /g;
+
+    # blow doubled or more spaces
+    $q =~ s/\s+/ /g;
+
+    # sanitize now that we're fairly predictable
+    $q =~ s/ IN\s*\(.*?\)/ IN (?)/ig; # kill long IN clauses
+    $q =~ s/ VALUES\s*\(.*?\)/ VALUES (?)/ig; # kill long VALUES clauses
+    $q =~ s/'(.*?)'/?/g;            # '234234' => ?
+    $q =~ s/"(.*?)"/?/g;            # '234234' => ?
+    $q =~ s/\b\d+\b/?/g;            #  234234  => ?
+    
+    return $q;
+}
+
 # call when we are idle
 sub idle {
     my Proximo::MySQL::Backend $self = $_[0];
@@ -318,6 +359,13 @@ sub idle {
     # set state
     Proximo::debug( '%s going idle.', $self );
     $self->state( 'idle' );
+    
+    # save results
+    $self->{random} ||= $self->current_database . "." . time() . "." . sprintf('%08d', int(rand()*100000000));
+    open FILE, ">>qlogs/$self->{random}"
+        or die "can't open new file in qlogs/ directory: $!\n";
+    print FILE sprintf('[%s %d %0.6f %d]%s', $self->current_database, $self->{cmd_count}, $self->{cmd_time}, $self->{response_bytes}, sanitize($self->{request_qry})) . "\n";
+    close FILE;
     
     # try to dequeue a packet, which will send stuff out
     $self->_dequeue_packet;
@@ -365,6 +413,9 @@ sub _dequeue_packet {
         if ( ref( $q->[1] ) eq 'Proximo::MySQL::Packet::Command' ) {     
             $self->{last_cmd} = time;
             $self->{cmd_type} = $q->[1]->command_type;
+            $self->{request_qry} = $q->[1]->argument;
+            $self->{response_bytes} = 0;
+            $self->{cmd_time} = [ gettimeofday() ];
             $self->{cmd_count}++;
         }
 

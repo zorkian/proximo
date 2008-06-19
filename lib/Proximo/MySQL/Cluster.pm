@@ -284,15 +284,14 @@ sub get_readonly_backend {
     my Proximo::MySQL::Cluster $self = $_[0];
     my Proximo::MySQL::Cluster::Instance $inst = $_[1];
 
-    # in single mode, we pull the one master ipport
+    # fallback
     my $ipport;
     if ( $self->is_setup_single ) {
-        $ipport = $self->{masters}->[0];
-
-    # in random mode, we just pick a random from the master, since everything
-    # is assumed to be read/write...
+        return $self->get_readwrite_backend( $inst );
+        
+    # fallback
     } elsif ( $self->is_setup_random ) {
-        $ipport = $self->{masters}->[ int( rand( scalar( @{ $self->{masters} } ) ) ) ];
+        return $self->get_readwrite_backend( $inst );
 
     # in the master-master case, we are using a single machine until something
     # causes us to decide to failover
@@ -445,7 +444,7 @@ sub query {
                           ( $inst->pins ? ' pins' : '' ), $qq );
 
             # pin it if necessary
-            if ( $inst->state_commands ) {
+            if ( 1||$inst->state_commands ) {
                 # pin this backend
                 if ( $allow_writes ) {
                     $inst->pinned_readwrite_backend( $be );
@@ -457,8 +456,10 @@ sub query {
                 # FIXME: this is grossly inefficient with any sort of volume, this needs to be redone in
                 # a way that will work well at scale.  perhaps we keep a generation count of the number of
                 # state commands used, then we just compare a simple number.
-                $be->run_state_command( $_ )
-                    foreach @{ $inst->state_commands };
+                if ( $inst->state_commands ) {
+                    $be->run_state_command( $_ )
+                        foreach @{ $inst->state_commands };
+                }
             }
 
             # but if it's not, send a packet
@@ -480,7 +481,7 @@ sub query {
     # so by this point we know what's going on with the query, so let's actually
     # figure out what backend to send it to.  if we're sticky they might have a backend
     # already...
-    if ( $q->is_write || $inst->sticky ) {
+    if ( $q->is_write || $self->is_setup_single || $inst->sticky ) {
         # see if they have a backend already
         $query_to->( 1,
                      $inst->pinned_readwrite_backend ||
@@ -754,6 +755,7 @@ sub backend_idle {
 # true if we are pinning backends
 sub pins {
     my Proximo::MySQL::Cluster::Instance $self = $_[0];
+    return 1;
     return $self->{states} ? 1 : 0;
 }
 

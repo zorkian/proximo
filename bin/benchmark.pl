@@ -12,7 +12,7 @@ use Time::HiRes qw( gettimeofday tv_interval );
 my $prox = 'DBI:mysql:database=test;host=127.0.0.1;port=2306';
 my $mysql = 'DBI:mysql:database=test;host=127.0.0.1;port=3306';
 my $thread = 1;
-my $queries = 1000;
+my $queries = 5000;
 
 my $which = shift;
 my $dbi;

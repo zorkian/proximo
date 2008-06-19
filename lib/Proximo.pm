@@ -9,7 +9,7 @@ use Proximo::Configuration;
 use Proximo::Service;
 use Proximo::Socket;
 
-use constant VERBOSITY => 0; # 0 = quiet (no warnings), 1 = normal (warnings),
+use constant VERBOSITY => 3; # 0 = quiet (no warnings), 1 = normal (warnings),
                              # 2 = verbose (info), 3 = very verbose (debug)
 
 our $VERSION = '0.01';
